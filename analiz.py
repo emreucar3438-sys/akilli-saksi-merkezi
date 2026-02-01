@@ -6,7 +6,7 @@ import ssl
 import threading
 
 # --- AYARLAR (HIVE MQ & TELEGRAM) ---
-BROKER_URL = "c7a265635c0947dd9338de41699abf4b.s1.eu.hivemq.cloud"
+BROKER_URL = "192.168.1.59"
 MQTT_USER = "emre_saksi"
 MQTT_PASS = "Kayseri.3438"
 TELEGRAM_TOKEN = "8361884405:AAHZMyTnNLHWuNKkBhJkPLRW7xRtfzQN-SM"
@@ -14,7 +14,7 @@ CHAT_ID = "8504915615"
 PUSH_KEY = "MWbLO2lB7DuSJBKee5Zk"
 
 # --- TOPIC AYARLARI ---
-TOPIC_SENSOR = "esp32/sensor"   
+TOPIC_SENSOR = "saksi/sensor"   
 TOPIC_KOMUT = "esp32/komut"
 TOPIC_BILDIRIM = "saksi/bildirim"
 
@@ -74,17 +74,18 @@ def on_message(client, userdata, message):
 # --- MQTT KURULUMU ---
 client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
 client.username_pw_set(MQTT_USER, MQTT_PASS)
-client.tls_set(cert_reqs=ssl.CERT_NONE)
-client.on_message = on_message
+#client.tls_set(cert_reqs=ssl.CERT_NONE)
+#client.on_message = on_message
 
 # Bekçiyi başlat
 threading.Thread(target=bekci_kopegi, daemon=True).start()
 
 try:
     print("🚀 Akıllı Saksı Merkezi Çevrimiçi. Dinleme başlıyor...")
-    client.connect(BROKER_URL, 8883)
+    client.connect(BROKER_URL, 1883)
     client.subscribe([(TOPIC_SENSOR, 0), (TOPIC_BILDIRIM, 0)])
     telegram_gonder("🚀 Akıllı Saksı Sistemi Bulut Üzerinden Aktif!")
     client.loop_forever()
 except Exception as e:
     print(f"❌ Bağlantı Hatası: {e}")
+
