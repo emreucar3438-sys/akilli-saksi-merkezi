@@ -1,6 +1,7 @@
 import paho.mqtt.client as mqtt
 from datetime import datetime, timedelta
-import time, requests, ssl, threading
+import time, requests, ssl, threading, os
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # --- AYARLAR (ESP32 İLE TAM UYUMLU) ---
 BROKER_URL = "c7a265635c0947dd9338de41699abf4b.s1.eu.hivemq.cloud"
@@ -14,11 +15,26 @@ son_gorulme = datetime.now()
 son_telegram_vakti = 0
 bekci_kilit = threading.Lock()
 
+# --- RENDER İÇİN YAŞAM SİNYALİ SUNUCUSU ---
+# Render, dışarıdan bir portun dinlenmesini ister. Bu sınıf onu sağlar.
+class RenderKandirici(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+        self.wfile.write(b"Saksi Sistemi Online ve MQTT Dinliyor!")
+
+def run_render_server():
+    # Render'ın verdiği portu al, yoksa 10000 kullan
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(('0.0.0.0', port), RenderKandirici)
+    print(f"--- 🛡️ Render Yaşam Sinyali {port} Portunda Başlatıldı ---")
+    server.serve_forever()
+
 def telegram_gonder(mesaj):
     global son_telegram_vakti
     simdi = time.time()
     
-    # 🛡️ ANTI-SPAM: Nem mesajları peş peşe gelirse 15 saniye barajı uygula
     if "Nem:" in mesaj and (simdi - son_telegram_vakti) < 15:
         print(f"🚫 Spam engellendi: {mesaj}")
         return
@@ -37,7 +53,6 @@ def bekci_kopegi():
     while True:
         time.sleep(30)
         with bekci_kilit:
-            # 🔔 10 dakika veri gelmezse uyar (ESP32 uyku süresi dahil)
             if datetime.now() > son_gorulme + timedelta(seconds=600):
                 uyari = "⚠️ KRİTİK: Cihazdan 10 dakikadır haber alınamıyor! Pil veya WiFi kontrolü yapın."
                 telegram_gonder(uyari)
@@ -72,8 +87,12 @@ client.tls_set(cert_reqs=ssl.CERT_NONE)
 client.on_message = on_message
 client.on_disconnect = on_disconnect
 
-# Bekçiyi yan kolda başlat
+# 1. Bekçiyi yan kolda başlat
 threading.Thread(target=bekci_kopegi, daemon=True).start()
+
+# 2. RENDER YAŞAM SİNYALİNİ (HTTP Sunucu) yan kolda başlat
+# Bu sayede Render "Bu servis çalışıyor" diyecek ve bizi kapatmayacak.
+threading.Thread(target=run_render_server, daemon=True).start()
 
 try:
     print("🚀 Akıllı Saksı Sistemi Başlatıldı...")
@@ -83,3 +102,4 @@ try:
     client.loop_forever()
 except Exception as e: 
     print(f"❌ Ana Hata: {e}")
+
