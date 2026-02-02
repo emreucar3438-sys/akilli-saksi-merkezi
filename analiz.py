@@ -2,7 +2,7 @@ import paho.mqtt.client as mqtt
 from datetime import datetime, timedelta
 import time, requests, ssl, threading
 
-# --- AYARLAR (ESP32 İLE AYNI) ---
+# --- AYARLAR (ESP32 İLE TAM UYUMLU) ---
 BROKER_URL = "c7a265635c0947dd9338de41699abf4b.s1.eu.hivemq.cloud"
 MQTT_USER = "emre_saksi"
 MQTT_PASS = "Kayseri.3438"
@@ -18,16 +18,17 @@ def telegram_gonder(mesaj):
     global son_telegram_vakti
     simdi = time.time()
     
-    # 🛡️ ANTI-SPAM: Nem mesajları için 15 saniye sınırı (Telegram banını önler)
+    # 🛡️ ANTI-SPAM: Nem mesajları peş peşe gelirse 15 saniye barajı uygula
     if "Nem:" in mesaj and (simdi - son_telegram_vakti) < 15:
+        print(f"🚫 Spam engellendi: {mesaj}")
         return
 
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {"chat_id": CHAT_ID, "text": mesaj}
-        requests.post(url, data=payload, timeout=10)
+        r = requests.post(url, data=payload, timeout=10)
         son_telegram_vakti = simdi
-        print(f"📡 Telegram'a Gönderildi: {mesaj}")
+        print(f"📡 Telegram Gönderildi: {mesaj} (Durum: {r.status_code})")
     except Exception as e: 
         print(f"❌ Telegram Hatası: {e}")
 
@@ -36,11 +37,11 @@ def bekci_kopegi():
     while True:
         time.sleep(30)
         with bekci_kilit:
-            # 🔔 10 Dakika (600sn) veri gelmezse uyar (ESP32 uyku süresi düşünülerek)
+            # 🔔 10 dakika veri gelmezse uyar (ESP32 uyku süresi dahil)
             if datetime.now() > son_gorulme + timedelta(seconds=600):
-                uyari = "⚠️ KRİTİK: Saksıdan 10 dakikadır haber alınamıyor! (Bağlantı veya Pil sorunu olabilir)"
+                uyari = "⚠️ KRİTİK: Cihazdan 10 dakikadır haber alınamıyor! Pil veya WiFi kontrolü yapın."
                 telegram_gonder(uyari)
-                son_gorulme = datetime.now() 
+                son_gorulme = datetime.now()
 
 def on_message(client, userdata, message):
     global son_gorulme
@@ -51,35 +52,33 @@ def on_message(client, userdata, message):
         payload = message.payload.decode("utf-8")
         print(f"📩 Gelen [{message.topic}]: {payload}")
         
-        # ESP32'den gelen her bildirimi Telegram'a uçur
         if message.topic == "saksi/bildirim":
             telegram_gonder(payload)
     except Exception as e:
-        print(f"❌ Mesaj İşleme Hatası: {e}")
+        print(f"❌ Mesaj Hatası: {e}")
 
 def on_disconnect(client, userdata, rc):
-    # İnternet kopsa bile otomatik geri bağlanma komutu
+    print("📡 Bağlantı koptu, yeniden bağlanılıyor...")
     if rc != 0:
-        print("📡 Bağlantı koptu, tekrar bağlanılıyor...")
         try:
             client.reconnect()
         except:
             pass
 
-# --- MQTT YAPILANDIRMASI ---
+# --- MQTT KURULUMU ---
 client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
 client.username_pw_set(MQTT_USER, MQTT_PASS)
-client.tls_set(cert_reqs=ssl.CERT_NONE) # HiveMQ Cloud Güvenli Bağlantı
+client.tls_set(cert_reqs=ssl.CERT_NONE)
 client.on_message = on_message
 client.on_disconnect = on_disconnect
 
-# Bekçiyi başlat
+# Bekçiyi yan kolda başlat
 threading.Thread(target=bekci_kopegi, daemon=True).start()
 
 try:
-    print("🚀 Akıllı Saksı Merkezi Çevrimiçi. Dinleme başlıyor...")
+    print("🚀 Akıllı Saksı Sistemi Başlatıldı...")
     client.connect(BROKER_URL, 8883)
-    client.subscribe("saksi/bildirim") # ESP32'nin attığı tam konu
+    client.subscribe("saksi/bildirim")
     telegram_gonder("🚀 Akıllı Saksı Sistemi Çevrimiçi! (Bulut Sunucu Aktif)")
     client.loop_forever()
 except Exception as e: 
