@@ -1,89 +1,70 @@
 import paho.mqtt.client as mqtt
-from datetime import datetime, timedelta
-import time, requests, ssl, threading, os
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import requests
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
 
 # --- AYARLAR ---
-BROKER_URL = "c7a265635c0947dd9338de41699abf4b.s1.eu.hivemq.cloud"
-MQTT_USER = "emre_saksi"
-MQTT_PASS = "Kayseri.3438"
-TELEGRAM_TOKEN = "8361884405:AAHZMyTnNLHWuNKkBhJkPLRW7xRtfzQN-SM"
-CHAT_ID = "8504915615"
+TOKEN = "7759247600:AAEB6F6v2tYv9qY9_OqfD6v0_9_0_9_0"
+ID = "744958117"
+MQTT_BROKER = "broker.hivemq.com"
+MQTT_TOPIC = "ev/saksi/nem"
 
-# --- DEĞİŞKENLER ---
-son_gorulme = datetime.now()
-son_telegram_vakti = 0
-bekci_kilit = threading.Lock()
+# Bekçi değişkenleri
+son_mesaj_zamani = time.time()
+bekci_uyarisi_verildi = False
 
-# --- RENDER İÇİN YAŞAM SİNYALİ SUNUCUSU (BU EKSİKTİ!) ---
-class RenderKandirici(BaseHTTPRequestHandler):
+# --- RENDER'I UYANIK TUTAN SUNUCU ---
+class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
         self.end_headers()
-        self.wfile.write(b"Saksi Sistemi Online ve MQTT Dinliyor!")
+        self.wfile.write(b"Saksi Sistemi Online... Cron-job basarili!")
 
-def run_render_server():
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(('0.0.0.0', port), RenderKandirici)
-    print(f"--- 🛡️ Render Yaşam Sinyali {port} Portunda Başlatıldı ---")
+def run_server():
+    server = HTTPServer(('0.0.0.0', 10000), SimpleHandler)
     server.serve_forever()
 
-def telegram_gonder(mesaj):
-    global son_telegram_vakti
-    simdi = time.time()
-    # Spam koruması: Aynı mesaj 15 sn içinde tekrar gelmesin
-    if "Nem:" in mesaj and (simdi - son_telegram_vakti) < 15:
-        return
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        payload = {"chat_id": CHAT_ID, "text": mesaj}
-        requests.post(url, data=payload, timeout=10)
-        son_telegram_vakti = simdi
-    except: pass
-
+# --- BEKÇİ KÖPEĞİ FONKSİYONU ---
 def bekci_kopegi():
-    global son_gorulme
+    global son_mesaj_zamani, bekci_uyarisi_verildi
     while True:
-        time.sleep(30)
-        with bekci_kilit:
-            # Şimdilik test için 10 dakika (600 sn) kalsın. 
-            # 8 saat uykuya geçince burayı 32400 yaparız.
-            if datetime.now() > son_gorulme + timedelta(seconds=600):
-                telegram_gonder("⚠️ KRİTİK: Cihazdan 10 dakikadır haber alınamıyor!")
-                son_gorulme = datetime.now()
+        gecen_sure = time.time() - son_mesaj_zamani
+        # 10 dakika (600 saniye) boyunca veri gelmezse
+        if gecen_sure > 600 and not bekci_uyarisi_verildi:
+            uyari = "🚨 DİKKAT: Saksıdan 10 dakikadır veri alınamıyor! Bağlantıyı kontrol et."
+            requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={ID}&text={uyari}")
+            bekci_uyarisi_verildi = True
+        
+        # Veri tekrar gelmeye başlarsa uyarı durumunu sıfırla
+        if gecen_sure < 600:
+            bekci_uyarisi_verildi = False
+            
+        time.sleep(60) # Her dakika kontrol et
 
-def on_message(client, userdata, message):
-    global son_gorulme
-    with bekci_kilit: 
-        son_gorulme = datetime.now()
-    try:
-        payload = message.payload.decode("utf-8")
-        if message.topic == "saksi/bildirim":
-            telegram_gonder(payload)
-    except: pass
+# --- MQTT VE ANALİZ ---
+def on_message(client, userdata, msg):
+    global son_mesaj_zamani
+    son_mesaj_zamani = time.time() # Bekçiye "buradayım" de
+    nem = msg.payload.decode()
+    mesaj = f"🪴 Nem Oranı: %{nem}"
+    print(mesaj)
+    requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={ID}&text={mesaj}")
 
-def on_disconnect(client, userdata, rc):
-    if rc != 0:
-        try: client.reconnect()
-        except: pass
-
-# --- ANA KURULUM ---
-client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
-client.username_pw_set(MQTT_USER, MQTT_PASS)
-client.tls_set(cert_reqs=ssl.CERT_NONE)
-client.on_message = on_message
-client.on_disconnect = on_disconnect
-
-# Render sunucusunu ve bekçiyi başlatıyoruz
-threading.Thread(target=bekci_kopegi, daemon=True).start()
-threading.Thread(target=run_render_server, daemon=True).start()
-
-try:
-    print("🚀 Sistem Başlatılıyor...")
-    client.connect(BROKER_URL, 8883)
-    client.subscribe("saksi/bildirim")
-    telegram_gonder("🚀 Sistem Tekrar Online! (Render Kurtarıldı)")
+# --- ANA ÇALIŞTIRICI ---
+if __name__ == "__main__":
+    # 1. Sunucuyu başlat (Cron-job için)
+    threading.Thread(target=run_server, daemon=True).start()
+    
+    # 2. Bekçi Köpeğini başlat (Takip için)
+    threading.Thread(target=bekci_kopegi, daemon=True).start()
+    
+    # 3. MQTT'yi başlat
+    client = mqtt.Client()
+    client.on_message = on_message
+    client.connect(MQTT_BROKER, 1883, 60)
+    client.subscribe(MQTT_TOPIC)
+    
+    print("Sistem (Bekçi Dahil) baslatildi...")
     client.loop_forever()
-except Exception as e:
-    print(f"Hata: {e}")
