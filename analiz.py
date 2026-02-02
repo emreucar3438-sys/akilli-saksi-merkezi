@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import time, requests, ssl, threading, os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# --- AYARLAR (ESP32 İLE TAM UYUMLU) ---
+# --- AYARLAR ---
 BROKER_URL = "c7a265635c0947dd9338de41699abf4b.s1.eu.hivemq.cloud"
 MQTT_USER = "emre_saksi"
 MQTT_PASS = "Kayseri.3438"
@@ -15,8 +15,7 @@ son_gorulme = datetime.now()
 son_telegram_vakti = 0
 bekci_kilit = threading.Lock()
 
-# --- RENDER İÇİN YAŞAM SİNYALİ SUNUCUSU ---
-# Render, dışarıdan bir portun dinlenmesini ister. Bu sınıf onu sağlar.
+# --- RENDER İÇİN YAŞAM SİNYALİ SUNUCUSU (BU EKSİKTİ!) ---
 class RenderKandirici(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -25,7 +24,6 @@ class RenderKandirici(BaseHTTPRequestHandler):
         self.wfile.write(b"Saksi Sistemi Online ve MQTT Dinliyor!")
 
 def run_render_server():
-    # Render'ın verdiği portu al, yoksa 10000 kullan
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(('0.0.0.0', port), RenderKandirici)
     print(f"--- 🛡️ Render Yaşam Sinyali {port} Portunda Başlatıldı ---")
@@ -34,72 +32,58 @@ def run_render_server():
 def telegram_gonder(mesaj):
     global son_telegram_vakti
     simdi = time.time()
-    
+    # Spam koruması: Aynı mesaj 15 sn içinde tekrar gelmesin
     if "Nem:" in mesaj and (simdi - son_telegram_vakti) < 15:
-        print(f"🚫 Spam engellendi: {mesaj}")
         return
-
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {"chat_id": CHAT_ID, "text": mesaj}
-        r = requests.post(url, data=payload, timeout=10)
+        requests.post(url, data=payload, timeout=10)
         son_telegram_vakti = simdi
-        print(f"📡 Telegram Gönderildi: {mesaj} (Durum: {r.status_code})")
-    except Exception as e: 
-        print(f"❌ Telegram Hatası: {e}")
+    except: pass
 
 def bekci_kopegi():
     global son_gorulme
     while True:
         time.sleep(30)
         with bekci_kilit:
+            # Şimdilik test için 10 dakika (600 sn) kalsın. 
+            # 8 saat uykuya geçince burayı 32400 yaparız.
             if datetime.now() > son_gorulme + timedelta(seconds=600):
-                uyari = "⚠️ KRİTİK: Cihazdan 10 dakikadır haber alınamıyor! Pil veya WiFi kontrolü yapın."
-                telegram_gonder(uyari)
+                telegram_gonder("⚠️ KRİTİK: Cihazdan 10 dakikadır haber alınamıyor!")
                 son_gorulme = datetime.now()
 
 def on_message(client, userdata, message):
     global son_gorulme
     with bekci_kilit: 
         son_gorulme = datetime.now()
-    
     try:
         payload = message.payload.decode("utf-8")
-        print(f"📩 Gelen [{message.topic}]: {payload}")
-        
         if message.topic == "saksi/bildirim":
             telegram_gonder(payload)
-    except Exception as e:
-        print(f"❌ Mesaj Hatası: {e}")
+    except: pass
 
 def on_disconnect(client, userdata, rc):
-    print("📡 Bağlantı koptu, yeniden bağlanılıyor...")
     if rc != 0:
-        try:
-            client.reconnect()
-        except:
-            pass
+        try: client.reconnect()
+        except: pass
 
-# --- MQTT KURULUMU ---
+# --- ANA KURULUM ---
 client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
 client.username_pw_set(MQTT_USER, MQTT_PASS)
 client.tls_set(cert_reqs=ssl.CERT_NONE)
 client.on_message = on_message
 client.on_disconnect = on_disconnect
 
-# 1. Bekçiyi yan kolda başlat
+# Render sunucusunu ve bekçiyi başlatıyoruz
 threading.Thread(target=bekci_kopegi, daemon=True).start()
-
-# 2. RENDER YAŞAM SİNYALİNİ (HTTP Sunucu) yan kolda başlat
-# Bu sayede Render "Bu servis çalışıyor" diyecek ve bizi kapatmayacak.
 threading.Thread(target=run_render_server, daemon=True).start()
 
 try:
-    print("🚀 Akıllı Saksı Sistemi Başlatıldı...")
+    print("🚀 Sistem Başlatılıyor...")
     client.connect(BROKER_URL, 8883)
     client.subscribe("saksi/bildirim")
-    telegram_gonder("🚀 Akıllı Saksı Sistemi Çevrimiçi! (Bulut Sunucu Aktif)")
+    telegram_gonder("🚀 Sistem Tekrar Online! (Render Kurtarıldı)")
     client.loop_forever()
-except Exception as e: 
-    print(f"❌ Ana Hata: {e}")
-
+except Exception as e:
+    print(f"Hata: {e}")
