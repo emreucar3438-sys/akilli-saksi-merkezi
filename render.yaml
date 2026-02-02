@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: akilli-saksi-bulut
+    runtime: python
+    buildCommand: "pip install paho-mqtt requests"
+    startCommand: "python analiz.py"
+    envVars:
+      - key: PORT
+        value: 10000
