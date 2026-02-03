@@ -5,7 +5,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # --- GÜNCEL VE KESİN AYARLAR ---
-TOKEN = "8595769743:AAF0l1t9xfYZDoc5AQ04jbKyG21Q-ZTf0e0"
+TOKEN = "8595769743:AAF0lit9xFYZDoc5AQO4jbKyG2lQ-ZTfOe0"
 ID = "8504915615"
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "ev/saksi/nem"
@@ -68,3 +68,4 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"MQTT Hatasi: {e}. 10sn sonra tekrar denenecek...", flush=True)
             time.sleep(10)
+
