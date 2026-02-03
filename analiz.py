@@ -14,7 +14,7 @@ MQTT_TOPIC = "ev/saksi/nem"
 son_mesaj_zamani = time.time()
 bekci_uyarisi_verildi = False
 
-# --- RENDER UYANIK TUTUCU ---
+# --- RENDER UYANIK TUTUCU (HTTP SERVER) ---
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -25,8 +25,10 @@ class SimpleHandler(BaseHTTPRequestHandler):
 def run_server():
     try:
         server = HTTPServer(('0.0.0.0', 10000), SimpleHandler)
+        print("🌍 HTTP Sunucu 10000 portunda baslatildi...")
         server.serve_forever()
-    except: pass
+    except Exception as e:
+        print(f"❌ Sunucu Hatasi: {e}")
 
 # --- BEKÇİ KÖPEĞİ (WATCHDOG) ---
 def bekci_kopegi():
@@ -39,43 +41,56 @@ def bekci_kopegi():
             try:
                 requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={ID}&text={uyari}", timeout=10)
                 bekci_uyarisi_verildi = True
+                print("⚠️ Bekci uyarisi gonderildi!")
             except:
-                print("Bekci uyari gonderemedi.")
+                print("❌ Bekci mesaj gonderemedi.")
         
         # Veri gelirse uyarıyı sıfırla
         if gecen_sure < 600:
             bekci_uyarisi_verildi = False
             
-        time.sleep(60) # Her dakika kontrol et
+        time.sleep(60)
 
 # --- MQTT MESAJ GELDİĞİNDE ---
 def on_message(client, userdata, msg):
     global son_mesaj_zamani
-    son_mesaj_zamani = time.time() # Zamanı güncelle (Bekçiye 'iyiyim' de)
+    son_mesaj_zamani = time.time()
     try:
         nem = msg.payload.decode()
         mesaj = f"🪴 Nem Orani: %{nem}"
-        print(f"Gelen Veri: {mesaj}")
-        requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={ID}&text={mesaj}", timeout=10)
+        print(f"📩 Gelen Veri: {mesaj}")
+        
+        # Telegram'a gonder
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={ID}&text={mesaj}"
+        resp = requests.get(url, timeout=10)
+        if resp.status_code == 200:
+            print("✅ Telegram mesaji basariyla ucuruldu!")
+        else:
+            print(f"❌ Telegram Hatasi: {resp.text}")
     except Exception as e:
-        print(f"Hata: {e}")
+        print(f"❌ Isleme Hatasi: {e}")
 
 # --- ANA ÇALIŞTIRICI ---
 if __name__ == "__main__":
-    # Servisleri başlat
+    # 1. HTTP Sunucusunu Arka Planda Baslat (Render icin)
     threading.Thread(target=run_server, daemon=True).start()
+    
+    # 2. Bekci Kopegini Arka Planda Baslat
     threading.Thread(target=bekci_kopegi, daemon=True).start()
     
-    # MQTT V2 Client
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2) 
+    # 3. MQTT Client Ayarla ve Baglan
+    # En uyumlu baglanti icin CallbackAPIVersion belirtilmedi (Standard V1 modu)
+    client = mqtt.Client() 
     client.on_message = on_message
     
     try:
+        print("🔗 MQTT Broker'a baglaniyor...")
         client.connect(MQTT_BROKER, 1883, 60)
         client.subscribe(MQTT_TOPIC)
-        print("🚀 Sistem V2 + Bekci Kopegi Baslatildi...")
+        print(f"🚀 SISTEM HAZIR! Dinlenen Topic: {MQTT_TOPIC}")
         client.loop_forever()
     except Exception as e:
-        print(f"Baglanti Hatasi: {e}")
+        print(f"💥 KRITIK HATA: {e}")
+
 
 
