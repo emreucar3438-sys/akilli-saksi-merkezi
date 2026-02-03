@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
 
 # --- AYARLAR ---
-TOKEN = "8361884405:AAHZMyTnLHWuNKkBhJkPLRW7xRt fZQN-SM"
+TOKEN = "8361884405:AAHZMyTnLHWuNKkBhJkPLRW7xRtfZQN-SM"
 ID = "8504915615"
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "ev/saksi/nem"
@@ -77,4 +77,5 @@ if __name__ == "__main__":
         client.loop_forever()
     except Exception as e:
         print(f"Baglanti Hatasi: {e}")
+
 
