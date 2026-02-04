@@ -15,6 +15,7 @@ bot = telebot.TeleBot(TOKEN)
 son_mesaj_zamani = time.time()
 bekci_uyarisi_verildi = False
 sulama_kayitlari = [] 
+son_nem = 0  # Nem takibi için eklenen değişken
 
 def telegram_haber_ver(mesaj):
     try:
@@ -29,7 +30,8 @@ def rapor_gonder(message):
         if not sulama_kayitlari:
             bot.reply_to(message, "📊 Henüz bir sulama kaydı bulunamadı aga.")
         else:
-            rapor_metni = "📊 *Son 10 Sulama Kaydı:*\n\n" + "\n".join(sulama_kayitlari)
+            # Markdown hatası almamak için metni temiz tutuyoruz
+            rapor_metni = "📊 *Son 10 Ölçüm Kaydı:*\n\n" + "\n".join(sulama_kayitlari)
             bot.send_message(message.chat.id, rapor_metni, parse_mode="Markdown")
     except Exception as e:
         print(f"Rapor Hatası: {e}", flush=True)
@@ -54,29 +56,48 @@ def bekci_kopegi():
             pass
         time.sleep(60)
 
+# --- YENİ VE AKILLI MESAJ İŞLEME ---
 def on_message(client, userdata, msg):
-    global son_mesaj_zamani
+    global son_nem, son_mesaj_zamani
     try:
         son_mesaj_zamani = time.time()
         gelen_veri = msg.payload.decode()
         
-        # 1. Her mesajı Telegram'a gönder
-        telegram_haber_ver(gelen_veri)
-        
-        # 2. Sayı ise ve 40'tan küçükse raporla
+        # Sadece sayı gelirse işlem yap (Metinleri eliyoruz)
         if gelen_veri.isdigit():
             nem = int(gelen_veri)
+            zaman = time.strftime('%d/%m %H:%M:%S')
+            
+            # 1. SENARYO: KRİTİK DURUM
             if nem < 40:
-                zaman = time.strftime('%d/%m %H:%M:%S')
-                kayit = f"🕒 {zaman} -> Kritik Nem: %{nem}"
-                if not sulama_kayitlari or "Kritik" not in sulama_kayitlari[0]:
-                    sulama_kayitlari.insert(0, kayit)
-                    if len(sulama_kayitlari) > 10: sulama_kayitlari.pop()
+                mesaj = f"🚨 Nem %{nem}! Durum KRİTİK, sulama başlıyor..."
+                kayit = f"🚨 {zaman} -> KRİTİK: %{nem}"
+            
+            # 2. SENARYO: SULAMA SONRASI (Nem fırladıysa)
+            elif nem > son_nem and son_nem != 0 and (nem - son_nem) > 5:
+                mesaj = f"🌿 Yeni Nem %{nem}"
+                kayit = f"✅ {zaman} -> Yeni Nem: %{nem}"
+            
+            # 3. SENARYO: NORMAL DURUM
+            else:
+                mesaj = f"🌿 Güncel Nem %{nem}"
+                kayit = f"✅ {zaman} -> Normal: %{nem}"
+            
+            # Telefonuna süslü mesajı at
+            telegram_haber_ver(mesaj)
+            
+            # Rapor listesine ekle
+            sulama_kayitlari.insert(0, kayit)
+            son_nem = nem # Hafızayı tazele
+            
+            if len(sulama_kayitlari) > 10:
+                sulama_kayitlari.pop()
+
     except Exception as e:
         print(f"Mesaj İşleme Hatası: {e}", flush=True)
 
 if __name__ == "__main__":
-    # Web Sunucusu (Render için port 10000)
+    # Web Sunucusu (Port 10000)
     threading.Thread(target=lambda: HTTPServer(('0.0.0.0', 10000), SimpleHandler).serve_forever(), daemon=True).start()
     
     # Bekçi ve Bot Threadleri
@@ -87,7 +108,6 @@ if __name__ == "__main__":
     
     while True:
         try:
-            # Burası en güvenli bağlantı şeklidir:
             client = mqtt.Client() 
             client.on_message = on_message
             client.connect(MQTT_BROKER, 1883, 60)
