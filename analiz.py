@@ -5,11 +5,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import paho.mqtt.client as mqtt
 import telebot
 
-# --- SADECE BU KISIM EKLENDİ (SAAT DÜZELTME) ---
+# --- SAAT DÜZELTME ---
 os.environ['TZ'] = 'Europe/Istanbul'
 if hasattr(time, 'tzset'):
     time.tzset()
-# ----------------------------------------------
 
 # --- AYARLAR ---
 TOKEN = "8595769743:AAF0lit9xFYZDoc5AQO4jbKyG2lQ-ZTfOe0"
@@ -53,6 +52,7 @@ def bekci_kopegi():
     while True:
         try:
             gecen_sure = time.time() - son_mesaj_zamani
+            # NOT: Test bitince 600 olan yeri 46800 (13 saat) yapmayı unutma!
             if gecen_sure > 600 and not bekci_uyarisi_verildi:
                 telegram_haber_ver("🚨 BEKÇİ UYARISI: Saksıdan 10 dakikadır veri alınamıyor!")
                 bekci_uyarisi_verildi = True
@@ -62,32 +62,38 @@ def bekci_kopegi():
             pass
         time.sleep(60)
 
+# --- GÜNCELLENEN AKILLI MESAJ İŞLEYİCİ ---
 def on_message(client, userdata, msg):
     global son_nem, son_mesaj_zamani
     try:
         son_mesaj_zamani = time.time()
         gelen_veri = msg.payload.decode()
         
-        if gelen_veri.isdigit():
-            nem = int(gelen_veri)
-            zaman = time.strftime('%d/%m %H:%M:%S') # Bu artık İstanbul saatini basacak
-            
-            if nem < 40:
-                mesaj = f"🚨 Nem %{nem}! Durum KRİTİK, sulama başlıyor..."
-                kayit = f"🚨 {zaman} -> KRİTİK: %{nem}"
-            elif nem > son_nem and son_nem != 0 and (nem - son_nem) > 5:
-                mesaj = f"🌿 Yeni Nem %{nem}"
-                kayit = f"✅ {zaman} -> Yeni Nem: %{nem}"
-            else:
-                mesaj = f"🌿 Güncel Nem %{nem}"
-                kayit = f"✅ {zaman} -> Normal: %{nem}"
-            
-            telegram_haber_ver(mesaj)
-            sulama_kayitlari.insert(0, kayit)
-            son_nem = nem
-            
-            if len(sulama_kayitlari) > 10:
-                sulama_kayitlari.pop()
+        # 1. Eğer gelen veri sayı DEĞİLSE (⚠️ HATA mesajı geldiyse)
+        if not gelen_veri.isdigit():
+            telegram_haber_ver(gelen_veri) # Direkt gönder (Hata mesajı, emoji vs.)
+            return # Aşağıdaki nem hesaplamalarına girme, fonksiyondan çık
+        
+        # 2. Eğer gelen veri sayı ise (Saksıdan rakam geldiyse)
+        nem = int(gelen_veri)
+        zaman = time.strftime('%d/%m %H:%M:%S')
+        
+        if nem < 40:
+            mesaj = f"🚨 Nem %{nem}! Durum KRİTİK, sulama başlıyor..."
+            kayit = f"🚨 {zaman} -> KRİTİK: %{nem}"
+        elif nem > son_nem and son_nem != 0 and (nem - son_nem) > 5:
+            mesaj = f"🌿 Yeni Nem %{nem}"
+            kayit = f"✅ {zaman} -> Yeni Nem: %{nem}"
+        else:
+            mesaj = f"🌿 Güncel Nem %{nem}"
+            kayit = f"✅ {zaman} -> Normal: %{nem}"
+        
+        telegram_haber_ver(mesaj)
+        sulama_kayitlari.insert(0, kayit)
+        son_nem = nem
+        
+        if len(sulama_kayitlari) > 10:
+            sulama_kayitlari.pop()
 
     except Exception as e:
         print(f"Mesaj İşleme Hatası: {e}", flush=True)
