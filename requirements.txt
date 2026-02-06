@@ -1,2 +1,4 @@
 paho-mqtt
 pyTelegramBotAPI
+pymongo
+dnspython
