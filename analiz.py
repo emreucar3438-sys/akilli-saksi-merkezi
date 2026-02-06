@@ -4,6 +4,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import paho.mqtt.client as mqtt
 import telebot
+from pymongo import MongoClient
+import datetime
 
 # --- SAAT DÜZELTME ---
 os.environ['TZ'] = 'Europe/Istanbul'
@@ -15,6 +17,16 @@ TOKEN = "8595769743:AAF0lit9xFYZDoc5AQO4jbKyG2lQ-ZTfOe0"
 ID = "8504915615"
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "ev/saksi/nem"
+
+# --- MONGODB BAĞLANTISI ---
+MONGO_URI = "mongodb+srv://emreucar3438_db_user:Kayseri.3438@cluster0.r39oc0p.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+try:
+    mongo_client = MongoClient(MONGO_URI)
+    db = mongo_client["AkilliSaksiDB"]
+    logs_col = db["NemGecmisi"]
+    print("MongoDB Bağlantısı Başarılı! ✅", flush=True)
+except Exception as e:
+    print(f"MongoDB Bağlantı Hatası: {e}", flush=True)
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -52,7 +64,6 @@ def bekci_kopegi():
     while True:
         try:
             gecen_sure = time.time() - son_mesaj_zamani
-            # NOT: Test bitince 600 olan yeri 46800 (13 saat) yapmayı unutma!
             if gecen_sure > 600 and not bekci_uyarisi_verildi:
                 telegram_haber_ver("🚨 BEKÇİ UYARISI: Saksıdan 10 dakikadır veri alınamıyor!")
                 bekci_uyarisi_verildi = True
@@ -62,28 +73,59 @@ def bekci_kopegi():
             pass
         time.sleep(60)
 
-# --- GÜNCELLENEN AKILLI MESAJ İŞLEYİCİ ---
+# --- GÜNCELLENEN AKILLI MESAJ İŞLEYİCİ (MONGODB DESTEKLİ) ---
 def on_message(client, userdata, msg):
     global son_nem, son_mesaj_zamani
     try:
         son_mesaj_zamani = time.time()
         gelen_veri = msg.payload.decode()
         
-        # 1. Eğer gelen veri sayı DEĞİLSE (⚠️ HATA mesajı geldiyse)
+        # 1. Eğer gelen veri sayı DEĞİLSE (Hata mesajı, emoji vs.)
         if not gelen_veri.isdigit():
-            telegram_haber_ver(gelen_veri) # Direkt gönder (Hata mesajı, emoji vs.)
-            return # Aşağıdaki nem hesaplamalarına girme, fonksiyondan çık
+            telegram_haber_ver(gelen_veri)
+            # Hataları da "SİSTEM_NOTU" olarak veri tabanına yazalım ki AI bilsin
+            logs_col.insert_one({
+                "cihaz": "Saksi_1",
+                "mesaj": gelen_veri,
+                "tur": "SİSTEM_NOTU",
+                "zaman": datetime.datetime.now()
+            })
+            return 
         
-        # 2. Eğer gelen veri sayı ise (Saksıdan rakam geldiyse)
+        # 2. Eğer gelen veri sayı ise (Nem rakamı)
         nem = int(gelen_veri)
         zaman = time.strftime('%d/%m %H:%M:%S')
+
+        # --- AI İÇİN AKILLI KAYIT VE ETİKETLEME ---
+        kayit_turu = "NORMAL_OKUMA"
+        ek_not = ""
+
+        if nem < 40:
+            kayit_turu = "KRITIK_DURUM"
+            ek_not = "Sulama Tetiklendi"
+        elif son_nem != 0 and (nem - son_nem) > 10:
+            kayit_turu = "SULAMA_YAPILDI"
+            ek_not = "Sulama Sonrası Artış"
+            telegram_haber_ver("💧 Sulama başarılı! Nem yükseldi.")
+
+        # MongoDB'ye detaylı kayıt (Gelecekte AI eğitmek için altın değerinde)
+        veri_paketi = {
+            "cihaz": "Saksi_1",
+            "nem": nem,
+            "tur": kayit_turu, 
+            "not": ek_not,
+            "zaman": datetime.datetime.now()
+        }
+        logs_col.insert_one(veri_paketi)
+        print(f"MongoDB: {kayit_turu} kaydedildi. 🏰", flush=True)
         
+        # --- TELEGRAM RAPOR MANTIĞI ---
         if nem < 40:
             mesaj = f"🚨 Nem %{nem}! Durum KRİTİK, sulama başlıyor..."
             kayit = f"🚨 {zaman} -> KRİTİK: %{nem}"
-        elif nem > son_nem and son_nem != 0 and (nem - son_nem) > 5:
-            mesaj = f"🌿 Yeni Nem %{nem}"
-            kayit = f"✅ {zaman} -> Yeni Nem: %{nem}"
+        elif kayit_turu == "SULAMA_YAPILDI":
+            mesaj = f"🌿 Sulama Sonrası Nem: %{nem}"
+            kayit = f"💧 {zaman} -> SULAMA: %{nem}"
         else:
             mesaj = f"🌿 Güncel Nem %{nem}"
             kayit = f"✅ {zaman} -> Normal: %{nem}"
@@ -103,7 +145,7 @@ if __name__ == "__main__":
     threading.Thread(target=bekci_kopegi, daemon=True).start()
     threading.Thread(target=bot.infinity_polling, daemon=True).start()
     
-    telegram_haber_ver("🚀 SİSTEM AKTİF! Saksı bekleniyor...")
+    telegram_haber_ver("🚀 SİSTEM AKTİF! Hem Telegram hem MongoDB hazır.")
     
     while True:
         try:
