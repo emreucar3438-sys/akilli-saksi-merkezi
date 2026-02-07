@@ -6,20 +6,26 @@ import paho.mqtt.client as mqtt
 import telebot
 from pymongo import MongoClient
 import datetime
+from dotenv import load_dotenv
+
+# --- GÜVENLİK ZIRHI ---
+# Render üzerindeki 'Environment' panelinden şifreleri okur.
+load_dotenv() 
+
+# --- AYARLAR (ŞİFRELER GİZLENDİ - RENDER'DAN ÇEKİLECEK) ---
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+ID = os.getenv("TELEGRAM_CHAT_ID")
+MONGO_URI = os.getenv("MONGO_URI")
+
+MQTT_BROKER = "broker.hivemq.com"
+MQTT_TOPIC = "ev/saksi/nem"
 
 # --- SAAT DÜZELTME ---
 os.environ['TZ'] = 'Europe/Istanbul'
 if hasattr(time, 'tzset'):
     time.tzset()
 
-# --- AYARLAR ---
-TOKEN = "8595769743:AAF0lit9xFYZDoc5AQO4jbKyG2lQ-ZTfOe0"
-ID = "8504915615"
-MQTT_BROKER = "broker.hivemq.com"
-MQTT_TOPIC = "ev/saksi/nem"
-
 # --- MONGODB BAĞLANTISI ---
-MONGO_URI = "mongodb+srv://emreucar3438_db_user:Kayseri.3438@cluster0.r39oc0p.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 try:
     mongo_client = MongoClient(MONGO_URI)
     db = mongo_client["AkilliSaksiDB"]
@@ -57,7 +63,7 @@ class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Saksi Sistemi Aktif ve Raporlama Hazir!")
+        self.wfile.write(b"Saksi Sistemi Aktif ve Bulut Uyumlu!")
 
 def bekci_kopegi():
     global son_mesaj_zamani, bekci_uyarisi_verildi
@@ -73,14 +79,12 @@ def bekci_kopegi():
             pass
         time.sleep(60)
 
-# --- SADELEŞTİRİLMİŞ MESAJ İŞLEYİCİ ---
 def on_message(client, userdata, msg):
     global son_nem, son_mesaj_zamani
     try:
         son_mesaj_zamani = time.time()
         gelen_veri = msg.payload.decode()
         
-        # 1. Sayı değilse
         if not gelen_veri.isdigit():
             telegram_haber_ver(gelen_veri)
             logs_col.insert_one({
@@ -91,11 +95,9 @@ def on_message(client, userdata, msg):
             })
             return 
         
-        # 2. Sayı ise
         nem = int(gelen_veri)
         zaman = time.strftime('%d/%m %H:%M:%S')
 
-        # --- ARKA PLAN KAYIT MANTIĞI ---
         kayit_turu = "NORMAL_OKUMA"
         ek_not = ""
 
@@ -106,7 +108,6 @@ def on_message(client, userdata, msg):
             kayit_turu = "SULAMA_YAPILDI"
             ek_not = "Sulama Sonrası Artış"
 
-        # MongoDB yine kaydını yapsın (Gelecekteki AI için dokunmuyoruz)
         veri_paketi = {
             "cihaz": "Saksi_1",
             "nem": nem,
@@ -116,12 +117,10 @@ def on_message(client, userdata, msg):
         }
         logs_col.insert_one(veri_paketi)
         
-        # --- SENİN ESKİ SADE TELEGRAM DÜZENİN ---
         if nem < 40:
             mesaj = f"🚨 Nem %{nem}! Durum KRİTİK, sulama başlıyor..."
             kayit = f"🚨 {zaman} -> KRİTİK: %{nem}"
-        elif nem > son_nem and son_nem != 0 and (nem - son_nem) > 5:
-            # SADECE "YENİ NEM" DİYECEK, FAZLALIK MESAJLAR KALDIRILDI!
+        elif nem > son_nem and son_nem != 0 and (nem - son_nem) > 10:
             mesaj = f"🌿 Yeni Nem %{nem}"
             kayit = f"✅ {zaman} -> Yeni Nem: %{nem}"
         else:
@@ -143,7 +142,7 @@ if __name__ == "__main__":
     threading.Thread(target=bekci_kopegi, daemon=True).start()
     threading.Thread(target=bot.infinity_polling, daemon=True).start()
     
-    telegram_haber_ver("🚀 SİSTEM AKTİF! Eski düzen sağlandı.")
+    telegram_haber_ver("🚀 SİSTEM ZIRHLI VE GÜVENLİ OLARAK BAŞLATILDI!")
     
     while True:
         try:
