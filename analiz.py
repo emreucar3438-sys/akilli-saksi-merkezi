@@ -79,6 +79,11 @@ def bekci_kopegi():
             pass
         time.sleep(60)
 
+# ← YENİ EKLENEN FONKSİYON
+def on_connect(client, userdata, flags, rc):
+    print(f"MQTT Bağlantı Durumu: {rc}", flush=True)
+    client.subscribe(MQTT_TOPIC)  # Bağlanınca hemen konuya abone ol
+
 def on_message(client, userdata, msg):
     global son_nem, son_mesaj_zamani
     try:
@@ -146,10 +151,11 @@ if __name__ == "__main__":
     
     while True:
         try:
-            client = mqtt.Client() 
+            # ← DEĞİŞEN KISIM: Client oluşturma ve bağlantı ayarları
+            client = mqtt.Client(client_id="Render_Saksi_Merkezi_Aga", clean_session=False)
+            client.on_connect = on_connect  # ← Bağlantı kontrolü eklendi
             client.on_message = on_message
             client.connect(MQTT_BROKER, 1883, 60)
-            client.subscribe(MQTT_TOPIC)
             client.loop_forever()
         except Exception as e:
             print(f"MQTT Hatası: {e}. Tekrar deneniyor...", flush=True)
