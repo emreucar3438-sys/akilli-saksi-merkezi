@@ -1,4 +1,4 @@
-
+"""
 Smart Plant Watering System - Cloud Backend
 ESP32 → MQTT → Bu Servis → MongoDB + Telegram
 
@@ -239,4 +239,5 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"MQTT Hatası: {e}. Tekrar deneniyor...", flush=True)
             time.sleep(10)  # 10 saniye bekle, tekrar dene
+
 
