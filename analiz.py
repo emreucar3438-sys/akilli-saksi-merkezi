@@ -1,4 +1,4 @@
-"""
+
 Smart Plant Watering System - Cloud Backend
 ESP32 → MQTT → Bu Servis → MongoDB + Telegram
 
@@ -67,7 +67,7 @@ def rapor_gonder(message):
     """
     try:
         if not sulama_kayitlari:
-            bot.reply_to(message, "📊 Henüz bir sulama kaydı bulunamadı aga.")
+            bot.reply_to(message, "📊 Henüz bir sulama kaydı bulunamadı.")
         else:
             rapor_metni = "📊 *Son 10 Ölçüm Kaydı:*\n\n" + "\n".join(sulama_kayitlari)
             bot.send_message(message.chat.id, rapor_metni, parse_mode="Markdown")
@@ -223,7 +223,7 @@ if __name__ == "__main__":
         try:
             # MQTT client oluştur
             client = mqtt.Client(
-                client_id="Render_Saksi_Merkezi_Aga",
+                client_id="Render_Saksi_Merkezi",
                 clean_session=False  # Subscription'ları koru
             )
             
@@ -239,3 +239,4 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"MQTT Hatası: {e}. Tekrar deneniyor...", flush=True)
             time.sleep(10)  # 10 saniye bekle, tekrar dene
+
