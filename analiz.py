@@ -71,14 +71,23 @@ def on_connect(client, userdata, flags, rc):
     client.subscribe(MQTT_TOPIC)
 
 def on_disconnect(client, userdata, rc):
-    print("MQTT disconnected!")
+    print("MQTT disconnected")
 
 def on_message(client, userdata, msg):
     global son_mesaj_zamani, son_nem
 
     try:
         payload = msg.payload.decode()
-        data = json.loads(payload)
+
+        # 🔥 SAFE JSON PARSE
+        try:
+            data = json.loads(payload)
+            if not isinstance(data, dict):
+                print("Invalid payload (not dict):", data)
+                return
+        except:
+            print("JSON error:", payload)
+            return
 
         son_mesaj_zamani = time.time()
         zaman = datetime.datetime.now().strftime("%d/%m %H:%M:%S")
@@ -86,8 +95,8 @@ def on_message(client, userdata, msg):
         mesaj = ""
         log = {}
 
-        # -------- ERROR --------
-        if "error" in data or "status" in data:
+        # ---------------- ERROR ----------------
+        if isinstance(data, dict) and ("error" in data or "status" in data):
 
             code = data.get("error") or data.get("status")
 
@@ -104,8 +113,8 @@ def on_message(client, userdata, msg):
                 "type": "error_log"
             }
 
-        # -------- SENSOR --------
-        if "nem" in data:
+        # ---------------- SENSOR ----------------
+        if isinstance(data, dict) and "nem" in data:
 
             nem = float(data.get("nem", 0))
             temp = float(data.get("temp", 0))
@@ -130,7 +139,7 @@ def on_message(client, userdata, msg):
                 "type": "sensor_log"
             }
 
-        # -------- SEND --------
+        # ---------------- SEND ----------------
         if mesaj:
             telegram(mesaj)
 
@@ -139,8 +148,8 @@ def on_message(client, userdata, msg):
                 if len(sulama_kayitlari) > 10:
                     sulama_kayitlari.pop()
 
-        # -------- MONGO --------
-        if col is not None and log:
+        # ---------------- MONGO ----------------
+        if col and log:
             try:
                 col.insert_one(log)
             except Exception as e:
@@ -149,7 +158,7 @@ def on_message(client, userdata, msg):
     except Exception as e:
         print("MQTT error:", e)
 
-# ---------------- COMMAND ----------------
+# ---------------- TELEGRAM COMMAND ----------------
 @bot.message_handler(commands=["rapor"])
 def rapor(msg):
     text = "🌱 SON 10 KAYIT:\n\n"
@@ -162,9 +171,7 @@ def rapor(msg):
 def mqtt_loop():
     while True:
         try:
-            client = mqtt.Client(
-                client_id="Smart_Pot_Server"
-            )
+            client = mqtt.Client(client_id="Smart_Pot_Server")
 
             client.on_connect = on_connect
             client.on_message = on_message
@@ -177,18 +184,21 @@ def mqtt_loop():
             print("MQTT crash:", e)
             time.sleep(5)
 
-# ---------------- MAIN (FINAL FIX) ----------------
+# ---------------- MAIN ----------------
 if __name__ == "__main__":
 
-    # background threads
+    # background services
     threading.Thread(target=watchdog, daemon=True).start()
     threading.Thread(target=mqtt_loop, daemon=True).start()
 
     telegram("🚀 Cloud System Started")
 
-    # 🔥 CRITICAL FIX: ONLY ONE POLLING INSTANCE
+    # 🔥 CRITICAL FIX (409 tamamen biter)
+    bot.remove_webhook()
+    time.sleep(2)
+
     bot.infinity_polling(
-        skip_pending=True,
-        timeout=30,
-        long_polling_timeout=30
+        skip_pending=False,
+        timeout=20,
+        long_polling_timeout=20
     )
