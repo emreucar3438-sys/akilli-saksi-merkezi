@@ -8,6 +8,7 @@ import paho.mqtt.client as mqtt
 import telebot
 from pymongo import MongoClient
 from dotenv import load_dotenv
+from flask import Flask, request
 
 # ---------------- CONFIG ----------------
 load_dotenv()
@@ -15,34 +16,21 @@ load_dotenv()
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 MONGO_URI = os.getenv("MONGO_URI")
+APP_URL = os.getenv("APP_URL")  # Render URL (https://xxx.onrender.com)
 
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "ev/saksi/nem"
 
-# ---------------- STATE ----------------
-son_mesaj_zamani = time.time()
-son_nem = 0
-lock = threading.Lock()
+# ---------------- FLASK ----------------
+app = Flask(__name__)
 
-sulama_kayitlari = []
-telegram_cooldown = 0
+# ---------------- TELEGRAM BOT ----------------
+bot = telebot.TeleBot(TOKEN)
 
-# ---------------- TELEGRAM ----------------
-bot = telebot.TeleBot(TOKEN, parse_mode=None)
-
-def telegram(msg):
-    global telegram_cooldown
-
-    now = time.time()
-    if now - telegram_cooldown < 10:
-        return
-
-    try:
-        bot.send_message(CHAT_ID, msg)
-        telegram_cooldown = now
-        print("TELEGRAM:", msg)
-    except Exception as e:
-        print("Telegram error:", e)
+# 🔥 WEBHOOK SETUP (CRITICAL FIX)
+bot.remove_webhook()
+time.sleep(1)
+bot.set_webhook(url=f"{APP_URL}/{TOKEN}")
 
 # ---------------- MONGO ----------------
 try:
@@ -53,6 +41,28 @@ try:
 except Exception as e:
     print("Mongo error:", e)
     col = None
+
+# ---------------- STATE ----------------
+son_mesaj_zamani = time.time()
+son_nem = 0
+lock = threading.Lock()
+sulama_kayitlari = []
+
+# ---------------- TELEGRAM SEND ----------------
+telegram_cooldown = 0
+
+def telegram(msg):
+    global telegram_cooldown
+
+    if time.time() - telegram_cooldown < 10:
+        return
+
+    try:
+        bot.send_message(CHAT_ID, msg)
+        telegram_cooldown = time.time()
+        print("TELEGRAM:", msg)
+    except Exception as e:
+        print("Telegram error:", e)
 
 # ---------------- WATCHDOG ----------------
 def watchdog():
@@ -70,14 +80,6 @@ def on_connect(client, userdata, flags, rc, properties=None):
     print("MQTT connected:", rc)
     client.subscribe(MQTT_TOPIC)
 
-def on_disconnect(client, userdata, rc, properties=None):
-    print("MQTT disconnected! reconnecting...")
-    time.sleep(3)
-    try:
-        client.reconnect()
-    except Exception as e:
-        print("Reconnect error:", e)
-
 def on_message(client, userdata, msg):
     global son_mesaj_zamani, son_nem
 
@@ -93,7 +95,6 @@ def on_message(client, userdata, msg):
 
         # ---------------- ERROR ----------------
         if isinstance(data, dict) and ("error" in data or "status" in data):
-
             code = data.get("error") or data.get("status")
 
             if code == "LOW_BATTERY":
@@ -152,9 +153,9 @@ def on_message(client, userdata, msg):
                 print("Mongo insert error:", e)
 
     except Exception as e:
-        print("MQTT processing error:", e)
+        print("MQTT error:", e)
 
-# ---------------- TELEGRAM COMMAND ----------------
+# ---------------- TELEGRAM COMMAND (WEBHOOK MODE) ----------------
 @bot.message_handler(commands=["rapor"])
 def rapor(message):
     text = "🌱 SON 10 KAYIT:\n\n"
@@ -167,17 +168,27 @@ def rapor(message):
 
     bot.send_message(message.chat.id, text)
 
+# ---------------- WEBHOOK ROUTE ----------------
+@app.route(f"/{TOKEN}", methods=["POST"])
+def telegram_webhook():
+    json_str = request.get_data().decode("utf-8")
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "OK", 200
+
+# ---------------- HOME ROUTE ----------------
+@app.route("/")
+def home():
+    return "Smart Pot System Running", 200
+
 # ---------------- MQTT LOOP ----------------
 def mqtt_loop():
     while True:
         try:
-            client = mqtt.Client(
-                client_id="Smart_Pot_Server"
-            )
+            client = mqtt.Client(client_id="Smart_Pot_Server")
 
             client.on_connect = on_connect
             client.on_message = on_message
-            client.on_disconnect = on_disconnect
 
             client.connect(MQTT_BROKER, 1883, 60)
             client.loop_forever()
@@ -186,29 +197,13 @@ def mqtt_loop():
             print("MQTT crash:", e)
             time.sleep(5)
 
-# ---------------- START ----------------
+# ---------------- START SYSTEM ----------------
 if __name__ == "__main__":
 
-    # 🚨 CRITICAL FIX: Telegram webhook temizle (409 çözümü)
-    try:
-        bot.remove_webhook()
-        time.sleep(1)
-    except:
-        pass
-
     threading.Thread(target=watchdog, daemon=True).start()
+    threading.Thread(target=mqtt_loop, daemon=True).start()
 
-    # ❗ bot polling TEK THREAD
-    threading.Thread(
-        target=lambda: bot.infinity_polling(
-            skip_pending=True,
-            timeout=20,
-            long_polling_timeout=20,
-            none_stop=True
-        ),
-        daemon=True
-    ).start()
+    telegram("🚀 Cloud System Started (WEBHOOK MODE)")
 
-    telegram("🚀 Cloud System Started")
-
-    mqtt_loop()
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
