@@ -124,8 +124,8 @@ def on_message(client, userdata, msg):
 def watchdog():
     global last_update
     while True:
-        if time.time() - last_update > 600:
-            send("⚠️ ESP32 veri göndermiyor (10 dk)")
+        if time.time() - last_update > 32400:
+            send("⚠️ ESP32 veri göndermiyor (9saat)")
         time.sleep(60)
 
 # ================== MQTT THREAD ==================
