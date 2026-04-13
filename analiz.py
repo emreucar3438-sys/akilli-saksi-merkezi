@@ -75,11 +75,11 @@ def bekci_kopegi():
     global son_mesaj_zamani, bekci_uyarisi_verildi
     while True:
         try:
-            if time.time() - son_mesaj_zamani > 600 and not bekci_uyarisi_verildi:
+            if time.time() - son_mesaj_zamani > 32400 and not bekci_uyarisi_verildi:
                 telegram_haber_ver("🚨 10 dakikadır veri yok!")
                 bekci_uyarisi_verildi = True
 
-            if time.time() - son_mesaj_zamani < 600:
+            if time.time() - son_mesaj_zamani < 32400:
                 bekci_uyarisi_verildi = False
 
         except:
