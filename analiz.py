@@ -23,7 +23,7 @@ MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "ev/saksi/nem"
 
 # ================== APP ==================
-app = Flask(_name_)
+app = Flask(__name__)
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
 # ================== DB ==================
@@ -138,7 +138,7 @@ def mqtt_loop():
     client.loop_forever()
 
 # ================== MAIN ==================
-if _name_ == "_main_":
+if __name__ == "__main__":
     threading.Thread(target=mqtt_loop, daemon=True).start()
     threading.Thread(target=watchdog, daemon=True).start()
 
