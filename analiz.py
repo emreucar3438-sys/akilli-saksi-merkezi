@@ -1,192 +1,186 @@
 import os
 import time
-import json
 import threading
-import datetime
-
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import paho.mqtt.client as mqtt
 import telebot
 from pymongo import MongoClient
+import datetime
 from dotenv import load_dotenv
-from flask import Flask, request
 
-# ---------------- CONFIG ----------------
+# --- ENV ---
 load_dotenv()
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+ID = os.getenv("TELEGRAM_CHAT_ID")
 MONGO_URI = os.getenv("MONGO_URI")
-APP_URL = os.getenv("APP_URL")  # Render URL (https://xxx.onrender.com)
 
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "ev/saksi/nem"
 
-# ---------------- FLASK ----------------
-app = Flask(__name__)
+# --- TIMEZONE ---
+os.environ['TZ'] = 'Europe/Istanbul'
+if hasattr(time, 'tzset'):
+    time.tzset()
 
-# ---------------- TELEGRAM BOT ----------------
+# --- DB ---
+try:
+    mongo_client = MongoClient(MONGO_URI)
+    db = mongo_client["AkilliSaksiDB"]
+    logs_col = db["NemGecmisi"]
+    print("MongoDB Bağlantısı Başarılı! ✅", flush=True)
+except Exception as e:
+    print(f"MongoDB Bağlantı Hatası: {e}", flush=True)
+
 bot = telebot.TeleBot(TOKEN)
 
-# 🔥 WEBHOOK SETUP (CRITICAL FIX)
-bot.remove_webhook()
-time.sleep(1)
-bot.set_webhook(url=f"{APP_URL}/{TOKEN}")
-
-# ---------------- MONGO ----------------
-try:
-    mongo = MongoClient(MONGO_URI)
-    db = mongo["AkilliSaksiDB"]
-    col = db["logs"]
-    print("MongoDB connected")
-except Exception as e:
-    print("Mongo error:", e)
-    col = None
-
-# ---------------- STATE ----------------
+# --- STATE ---
 son_mesaj_zamani = time.time()
-son_nem = 0
-lock = threading.Lock()
+bekci_uyarisi_verildi = False
 sulama_kayitlari = []
+son_nem = 0
 
-# ---------------- TELEGRAM SEND ----------------
-telegram_cooldown = 0
+# 🔋 YENİ BATARYA STATE
+son_batarya_uyarisi = False
 
-def telegram(msg):
-    global telegram_cooldown
-
-    if time.time() - telegram_cooldown < 10:
-        return
-
+# --- TELEGRAM ---
+def telegram_haber_ver(mesaj):
     try:
-        bot.send_message(CHAT_ID, msg)
-        telegram_cooldown = time.time()
-        print("TELEGRAM:", msg)
+        bot.send_message(ID, mesaj)
+        print(f"TELEGRAM: {mesaj}", flush=True)
     except Exception as e:
-        print("Telegram error:", e)
+        print(f"TELEGRAM HATASI: {e}", flush=True)
 
-# ---------------- WATCHDOG ----------------
-def watchdog():
-    global son_mesaj_zamani
+# --- RAPOR ---
+@bot.message_handler(commands=['rapor'])
+def rapor_gonder(message):
+    try:
+        if not sulama_kayitlari:
+            bot.reply_to(message, "📊 Henüz kayıt yok aga.")
+        else:
+            text = "📊 Son 10 Kayıt:\n\n" + "\n".join(sulama_kayitlari)
+            bot.send_message(message.chat.id, text)
+    except Exception as e:
+        print(f"Rapor Hatası: {e}", flush=True)
 
+# --- HTTP ---
+class SimpleHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Saksi Sistemi Aktif")
+
+# --- WATCHDOG ---
+def bekci_kopegi():
+    global son_mesaj_zamani, bekci_uyarisi_verildi
     while True:
-        time.sleep(30)
+        try:
+            if time.time() - son_mesaj_zamani > 600 and not bekci_uyarisi_verildi:
+                telegram_haber_ver("🚨 10 dakikadır veri yok!")
+                bekci_uyarisi_verildi = True
 
-        if time.time() - son_mesaj_zamani > 3600 * 9:
-            telegram("🚨 ESP32 OFFLINE (9 saat veri yok)")
-            print("WATCHDOG: ESP offline")
+            if time.time() - son_mesaj_zamani < 600:
+                bekci_uyarisi_verildi = False
 
-# ---------------- MQTT ----------------
-def on_connect(client, userdata, flags, rc, properties=None):
-    print("MQTT connected:", rc)
+        except:
+            pass
+
+        time.sleep(60)
+
+# --- MQTT ---
+def on_connect(client, userdata, flags, rc):
+    print(f"MQTT Bağlantı: {rc}", flush=True)
     client.subscribe(MQTT_TOPIC)
 
 def on_message(client, userdata, msg):
-    global son_mesaj_zamani, son_nem
+    global son_nem, son_mesaj_zamani, son_batarya_uyarisi
 
     try:
-        payload = msg.payload.decode()
-        data = json.loads(payload)
-
         son_mesaj_zamani = time.time()
-        zaman = datetime.datetime.now().strftime("%d/%m %H:%M:%S")
+        gelen = msg.payload.decode()
 
-        mesaj = None
-        log = None
+        zaman = time.strftime('%d/%m %H:%M:%S')
 
-        # ---------------- ERROR ----------------
-        if isinstance(data, dict) and ("error" in data or "status" in data):
-            code = data.get("error") or data.get("status")
+        # ---------------- JSON değilse direkt mesaj ----------------
+        if not gelen.isdigit():
+            telegram_haber_ver(gelen)
+            logs_col.insert_one({
+                "mesaj": gelen,
+                "zaman": datetime.datetime.now(),
+                "type": "system"
+            })
+            return
 
-            if code == "LOW_BATTERY":
-                mesaj = "⚡ Düşük batarya!"
-            elif code in ["LOCKED", "SYSTEM_LOCKED"]:
-                mesaj = "🔒 Sistem kilitlendi!"
-            else:
-                mesaj = f"⚠️ Durum: {code}"
+        nem = int(gelen)
 
-            log = {
-                "status": code,
-                "time": datetime.datetime.now(),
-                "type": "error_log"
-            }
+        kayit = ""
+        mesaj = ""
 
-        # ---------------- SENSOR ----------------
-        if isinstance(data, dict) and "nem" in data:
+        # ---------------- NEM LOJİK ----------------
+        if nem < 40:
+            mesaj = f"🚨 KRİTİK NEM %{nem}"
+            kayit = f"🚨 {zaman} -> KRİTİK %{nem}"
 
-            nem = float(data.get("nem", 0))
-            temp = float(data.get("temp", 0))
-            kritik = float(data.get("kritik", 0))
-            water = float(data.get("water", 0))
+        elif son_nem != 0 and (nem - son_nem) > 10:
+            mesaj = f"🌿 Sulama sonrası %{nem}"
+            kayit = f"✅ {zaman} -> SULAMA %{nem}"
 
-            if son_nem and nem > son_nem + 3:
-                mesaj = f"🌱 Sulama başarılı! Nem: {nem}%"
-            elif nem < kritik:
-                mesaj = f"🚨 KRİTİK NEM! {nem}%"
-            else:
-                mesaj = f"🌿 Nem: {nem}% | Temp: {temp}°C"
+        else:
+            mesaj = f"🌿 Nem %{nem}"
+            kayit = f"✅ {zaman} -> NORMAL %{nem}"
 
-            son_nem = nem
+        son_nem = nem
 
-            log = {
-                "nem": nem,
-                "temp": temp,
-                "kritik": kritik,
-                "water": water,
-                "time": datetime.datetime.now(),
-                "type": "sensor_log"
-            }
+        telegram_haber_ver(mesaj)
 
-        # ---------------- SEND ----------------
-        if mesaj:
-            telegram(mesaj)
+        sulama_kayitlari.insert(0, kayit)
+        if len(sulama_kayitlari) > 10:
+            sulama_kayitlari.pop()
 
-            with lock:
-                sulama_kayitlari.insert(0, f"{zaman} -> {mesaj}")
-                if len(sulama_kayitlari) > 10:
-                    sulama_kayitlari.pop()
+        logs_col.insert_one({
+            "nem": nem,
+            "zaman": datetime.datetime.now(),
+            "type": "sensor"
+        })
 
-        # ---------------- DB ----------------
-        if col is not None and log:
-            try:
-                col.insert_one(log)
-            except Exception as e:
-                print("Mongo insert error:", e)
+        # ---------------- 🔋 BATARYA KONTROL (YENİ EKLENDİ) ----------------
+        # Eğer MQTT mesajı JSON ise batarya kontrolü
+        try:
+            import json
+            data = json.loads(gelen)
+
+            if "batarya" in data:
+                batarya = int(data["batarya"])
+
+                if batarya < 20 and not son_batarya_uyarisi:
+                    telegram_haber_ver(f"⚡ DÜŞÜK BATARYA %{batarya} - Şarj et!")
+                    son_batarya_uyarisi = True
+
+                elif batarya >= 20:
+                    son_batarya_uyarisi = False
+
+        except:
+            pass
 
     except Exception as e:
-        print("MQTT error:", e)
+        print(f"MQTT Hatası: {e}", flush=True)
 
-# ---------------- TELEGRAM COMMAND (WEBHOOK MODE) ----------------
-@bot.message_handler(commands=["rapor"])
-def rapor(message):
-    text = "🌱 SON 10 KAYIT:\n\n"
+# --- MAIN ---
+if __name__ == "__main__":
 
-    with lock:
-        if sulama_kayitlari:
-            text += "\n".join(sulama_kayitlari)
-        else:
-            text += "Kayıt yok"
+    threading.Thread(
+        target=lambda: HTTPServer(('0.0.0.0', 10000), SimpleHandler).serve_forever(),
+        daemon=True
+    ).start()
 
-    bot.send_message(message.chat.id, text)
+    threading.Thread(target=bekci_kopegi, daemon=True).start()
+    threading.Thread(target=bot.infinity_polling, daemon=True).start()
 
-# ---------------- WEBHOOK ROUTE ----------------
-@app.route(f"/{TOKEN}", methods=["POST"])
-def telegram_webhook():
-    json_str = request.get_data().decode("utf-8")
-    update = telebot.types.Update.de_json(json_str)
-    bot.process_new_updates([update])
-    return "OK", 200
+    telegram_haber_ver("🚀 Sistem Başlatıldı")
 
-# ---------------- HOME ROUTE ----------------
-@app.route("/")
-def home():
-    return "Smart Pot System Running", 200
-
-# ---------------- MQTT LOOP ----------------
-def mqtt_loop():
     while True:
         try:
-            client = mqtt.Client(client_id="Smart_Pot_Server")
-
+            client = mqtt.Client(client_id="Render_Saksi")
             client.on_connect = on_connect
             client.on_message = on_message
 
@@ -194,16 +188,5 @@ def mqtt_loop():
             client.loop_forever()
 
         except Exception as e:
-            print("MQTT crash:", e)
-            time.sleep(5)
-
-# ---------------- START SYSTEM ----------------
-if __name__ == "__main__":
-
-    threading.Thread(target=watchdog, daemon=True).start()
-    threading.Thread(target=mqtt_loop, daemon=True).start()
-
-    telegram("🚀 Cloud System Started (WEBHOOK MODE)")
-
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+            print(f"MQTT Hatası: {e}", flush=True)
+            time.sleep(10)
