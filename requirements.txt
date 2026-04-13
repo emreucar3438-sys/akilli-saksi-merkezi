@@ -3,3 +3,4 @@ pyTelegramBotAPI
 pymongo
 dnspython
 python-dotenv
+flask
