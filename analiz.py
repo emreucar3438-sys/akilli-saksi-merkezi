@@ -28,7 +28,7 @@ sulama_kayitlari = []
 telegram_cooldown = 0
 
 # ---------------- TELEGRAM ----------------
-bot = telebot.TeleBot(TOKEN)
+bot = telebot.TeleBot(TOKEN, parse_mode=None)
 
 def telegram(msg):
     global telegram_cooldown
@@ -66,34 +66,30 @@ def watchdog():
             print("WATCHDOG: ESP offline")
 
 # ---------------- MQTT ----------------
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, flags, rc, properties=None):
     print("MQTT connected:", rc)
     client.subscribe(MQTT_TOPIC)
 
-def on_disconnect(client, userdata, rc):
-    print("MQTT disconnected")
+def on_disconnect(client, userdata, rc, properties=None):
+    print("MQTT disconnected! reconnecting...")
+    time.sleep(3)
+    try:
+        client.reconnect()
+    except Exception as e:
+        print("Reconnect error:", e)
 
 def on_message(client, userdata, msg):
     global son_mesaj_zamani, son_nem
 
     try:
         payload = msg.payload.decode()
-
-        # 🔥 SAFE JSON PARSE
-        try:
-            data = json.loads(payload)
-            if not isinstance(data, dict):
-                print("Invalid payload (not dict):", data)
-                return
-        except:
-            print("JSON error:", payload)
-            return
+        data = json.loads(payload)
 
         son_mesaj_zamani = time.time()
         zaman = datetime.datetime.now().strftime("%d/%m %H:%M:%S")
 
-        mesaj = ""
-        log = {}
+        mesaj = None
+        log = None
 
         # ---------------- ERROR ----------------
         if isinstance(data, dict) and ("error" in data or "status" in data):
@@ -121,7 +117,7 @@ def on_message(client, userdata, msg):
             kritik = float(data.get("kritik", 0))
             water = float(data.get("water", 0))
 
-            if son_nem != 0 and nem > son_nem + 3:
+            if son_nem and nem > son_nem + 3:
                 mesaj = f"🌱 Sulama başarılı! Nem: {nem}%"
             elif nem < kritik:
                 mesaj = f"🚨 KRİTİK NEM! {nem}%"
@@ -148,30 +144,36 @@ def on_message(client, userdata, msg):
                 if len(sulama_kayitlari) > 10:
                     sulama_kayitlari.pop()
 
-        # ---------------- MONGO ----------------
-        if col and log:
+        # ---------------- DB ----------------
+        if col is not None and log:
             try:
                 col.insert_one(log)
             except Exception as e:
                 print("Mongo insert error:", e)
 
     except Exception as e:
-        print("MQTT error:", e)
+        print("MQTT processing error:", e)
 
 # ---------------- TELEGRAM COMMAND ----------------
 @bot.message_handler(commands=["rapor"])
-def rapor(msg):
+def rapor(message):
     text = "🌱 SON 10 KAYIT:\n\n"
-    with lock:
-        text += "\n".join(sulama_kayitlari) if sulama_kayitlari else "Kayıt yok"
 
-    bot.send_message(msg.chat.id, text)
+    with lock:
+        if sulama_kayitlari:
+            text += "\n".join(sulama_kayitlari)
+        else:
+            text += "Kayıt yok"
+
+    bot.send_message(message.chat.id, text)
 
 # ---------------- MQTT LOOP ----------------
 def mqtt_loop():
     while True:
         try:
-            client = mqtt.Client(client_id="Smart_Pot_Server")
+            client = mqtt.Client(
+                client_id="Smart_Pot_Server"
+            )
 
             client.on_connect = on_connect
             client.on_message = on_message
@@ -184,21 +186,29 @@ def mqtt_loop():
             print("MQTT crash:", e)
             time.sleep(5)
 
-# ---------------- MAIN ----------------
+# ---------------- START ----------------
 if __name__ == "__main__":
 
-    # background services
+    # 🚨 CRITICAL FIX: Telegram webhook temizle (409 çözümü)
+    try:
+        bot.remove_webhook()
+        time.sleep(1)
+    except:
+        pass
+
     threading.Thread(target=watchdog, daemon=True).start()
-    threading.Thread(target=mqtt_loop, daemon=True).start()
+
+    # ❗ bot polling TEK THREAD
+    threading.Thread(
+        target=lambda: bot.infinity_polling(
+            skip_pending=True,
+            timeout=20,
+            long_polling_timeout=20,
+            none_stop=True
+        ),
+        daemon=True
+    ).start()
 
     telegram("🚀 Cloud System Started")
 
-    # 🔥 CRITICAL FIX (409 tamamen biter)
-    bot.remove_webhook()
-    time.sleep(2)
-
-    bot.infinity_polling(
-        skip_pending=False,
-        timeout=20,
-        long_polling_timeout=20
-    )
+    mqtt_loop()
