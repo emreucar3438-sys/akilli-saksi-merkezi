@@ -19,7 +19,7 @@ MONGO_URI = os.getenv("MONGO_URI")
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "ev/saksi/nem"
 
-# ---------------- GLOBAL STATE ----------------
+# ---------------- STATE ----------------
 son_mesaj_zamani = time.time()
 son_nem = 0
 lock = threading.Lock()
@@ -61,23 +61,17 @@ def watchdog():
     while True:
         time.sleep(30)
 
-        # ESP32 deep sleep yüzünden süre uzatıldı
         if time.time() - son_mesaj_zamani > 3600 * 9:
             telegram("🚨 ESP32 OFFLINE (9 saat veri yok)")
             print("WATCHDOG: ESP offline")
 
-# ---------------- MQTT EVENTS ----------------
+# ---------------- MQTT ----------------
 def on_connect(client, userdata, flags, rc):
     print("MQTT connected:", rc)
     client.subscribe(MQTT_TOPIC)
 
 def on_disconnect(client, userdata, rc):
-    print("MQTT disconnected! reconnecting...")
-    time.sleep(3)
-    try:
-        client.reconnect()
-    except:
-        pass
+    print("MQTT disconnected!")
 
 def on_message(client, userdata, msg):
     global son_mesaj_zamani, son_nem
@@ -92,17 +86,15 @@ def on_message(client, userdata, msg):
         mesaj = ""
         log = {}
 
-        # ---------------- ERROR HANDLING ----------------
+        # -------- ERROR --------
         if "error" in data or "status" in data:
 
             code = data.get("error") or data.get("status")
 
             if code == "LOW_BATTERY":
                 mesaj = "⚡ Düşük batarya!"
-
-            elif code == "LOCKED" or code == "SYSTEM_LOCKED":
+            elif code in ["LOCKED", "SYSTEM_LOCKED"]:
                 mesaj = "🔒 Sistem kilitlendi!"
-
             else:
                 mesaj = f"⚠️ Durum: {code}"
 
@@ -112,20 +104,18 @@ def on_message(client, userdata, msg):
                 "type": "error_log"
             }
 
-        # ---------------- NORMAL SENSOR DATA ----------------
+        # -------- SENSOR --------
         if "nem" in data:
 
             nem = float(data.get("nem", 0))
-            temp = float(data.get("temp", -999))
-            kritik = float(data.get("kritik", -1))
+            temp = float(data.get("temp", 0))
+            kritik = float(data.get("kritik", 0))
             water = float(data.get("water", 0))
 
             if son_nem != 0 and nem > son_nem + 3:
                 mesaj = f"🌱 Sulama başarılı! Nem: {nem}%"
-
             elif nem < kritik:
                 mesaj = f"🚨 KRİTİK NEM! {nem}%"
-
             else:
                 mesaj = f"🌿 Nem: {nem}% | Temp: {temp}°C"
 
@@ -140,7 +130,7 @@ def on_message(client, userdata, msg):
                 "type": "sensor_log"
             }
 
-        # ---------------- SEND ----------------
+        # -------- SEND --------
         if mesaj:
             telegram(mesaj)
 
@@ -149,7 +139,7 @@ def on_message(client, userdata, msg):
                 if len(sulama_kayitlari) > 10:
                     sulama_kayitlari.pop()
 
-        # ---------------- MONGO SAVE ----------------
+        # -------- MONGO --------
         if col is not None and log:
             try:
                 col.insert_one(log)
@@ -157,24 +147,22 @@ def on_message(client, userdata, msg):
                 print("Mongo insert error:", e)
 
     except Exception as e:
-        print("MQTT processing error:", e)
+        print("MQTT error:", e)
 
-# ---------------- TELEGRAM COMMAND ----------------
+# ---------------- COMMAND ----------------
 @bot.message_handler(commands=["rapor"])
 def rapor(msg):
-
     text = "🌱 SON 10 KAYIT:\n\n"
     with lock:
         text += "\n".join(sulama_kayitlari) if sulama_kayitlari else "Kayıt yok"
 
     bot.send_message(msg.chat.id, text)
 
-# ---------------- MAIN ----------------
+# ---------------- MQTT LOOP ----------------
 def mqtt_loop():
     while True:
         try:
             client = mqtt.Client(
-                mqtt.CallbackAPIVersion.VERSION1,
                 client_id="Smart_Pot_Server"
             )
 
@@ -189,12 +177,18 @@ def mqtt_loop():
             print("MQTT crash:", e)
             time.sleep(5)
 
-# ---------------- START SYSTEM ----------------
+# ---------------- MAIN (FINAL FIX) ----------------
 if __name__ == "__main__":
 
+    # background threads
     threading.Thread(target=watchdog, daemon=True).start()
-    threading.Thread(target=lambda: bot.infinity_polling(), daemon=True).start()
+    threading.Thread(target=mqtt_loop, daemon=True).start()
 
     telegram("🚀 Cloud System Started")
 
-    mqtt_loop()
+    # 🔥 CRITICAL FIX: ONLY ONE POLLING INSTANCE
+    bot.infinity_polling(
+        skip_pending=True,
+        timeout=30,
+        long_polling_timeout=30
+    )
