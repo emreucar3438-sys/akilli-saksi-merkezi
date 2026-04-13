@@ -108,4 +108,4 @@ if __name__ == "__main__":
     
     print("Bot Polling modunda başlatıldı... 🌱")
     # Botu sonsuz döngüde çalıştır
-    bot.infinity_polling() bunu yüklryimmi
+    bot.infinity_polling()
