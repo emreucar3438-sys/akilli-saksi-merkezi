@@ -33,6 +33,7 @@ col = db["logs"]
 
 # ================== STATE ==================
 last_update = time.time()
+is_alert_active = False   # 🔥 KRİTİK DÜZELTME BURASI
 
 # ================== TELEGRAM ==================
 def send(msg):
@@ -103,7 +104,6 @@ def on_message(client, userdata, msg):
             f"🚰 Su: {water:.1f} ml"
         )
 
-        # kritik durum
         if nem < kritik:
             msg_text = "🚨 <b>KRİTİK NEM!</b>\n" + msg_text
 
@@ -122,10 +122,20 @@ def on_message(client, userdata, msg):
 
 # ================== WATCHDOG ==================
 def watchdog():
-    global last_update
+    global last_update, is_alert_active
+
     while True:
-        if time.time() - last_update > 32400:
-            send("⚠️ ESP32 veri göndermiyor (9saat)")
+        current_diff = time.time() - last_update
+
+        # 9 saat veri yoksa
+        if current_diff > 32400 and not is_alert_active:
+            send("⚠️ ESP32 veri göndermiyor (9 saat)")
+            is_alert_active = True
+
+        # veri geri gelirse alarm reset
+        elif current_diff < 32400:
+            is_alert_active = False
+
         time.sleep(60)
 
 # ================== MQTT THREAD ==================
