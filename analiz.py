@@ -150,7 +150,7 @@ def watchdog():
 
 # ================== MQTT THREAD ==================
 def mqtt_loop():
-    client = mqtt.Client(client_id=f"pot_{int(time.time())}")
+    client = mqtt.Client(client_id="akilli_saksi_v2", clean_session=True)
     client.on_connect = on_connect
     client.on_message = on_message
 
