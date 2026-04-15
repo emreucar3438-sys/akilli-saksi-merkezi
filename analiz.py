@@ -34,11 +34,21 @@ col = db["logs"]
 # ================== STATE ==================
 last_update = time.time()
 is_alert_active = False   # 🔥 KRİTİK DÜZELTME BURASI
+last_telegram_send_time = 0  # 🔥 Yeni eklenen: Son mesajın zamanı
 
 # ================== TELEGRAM ==================
 def send(msg):
+    global last_telegram_send_time
+    current_time = time.time()
+    
+    # 🔥 Çift mesajı önleyen filtre: Son mesajdan beri 2 saniye geçmediyse gönderme
+    if current_time - last_telegram_send_time < 2:
+        print("ÇİFT MESAJ ENGELLENDİ:", msg)
+        return
+
     try:
         bot.send_message(CHAT_ID, msg)
+        last_telegram_send_time = current_time # Zamanı güncelle
         print("TELEGRAM:", msg)
     except Exception as e:
         print("Telegram error:", e)
