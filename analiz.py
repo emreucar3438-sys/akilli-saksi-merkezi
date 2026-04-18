@@ -56,8 +56,10 @@ def send(msg):
         print("Telegram error:", e)
 
 # ================== TELEGRAM HANDLER ==================
+# ================== TELEGRAM HANDLER ==================
 @bot.message_handler(func=lambda message: True)
 def handle_all(message):
+    print(f"Gelen Mesaj: {message.text}") # Debug için ekledik
     if message.text and message.text.lower() == "rapor":
         send_report()
 
