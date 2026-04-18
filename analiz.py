@@ -33,25 +33,61 @@ col = db["logs"]
 
 # ================== STATE ==================
 last_update = time.time()
-is_alert_active = False   # 🔥 KRİTİK DÜZELTME BURASI
-last_telegram_send_time = 0  # 🔥 Yeni eklenen: Son mesajın zamanı
+is_alert_active = False
+last_telegram_send_time = 0
 
 # ================== TELEGRAM ==================
 def send(msg):
     global last_telegram_send_time
     current_time = time.time()
-    
-    # 🔥 Çift mesajı önleyen filtre: Son mesajdan beri 2 saniye geçmediyse gönderme
+
+    # Çift mesaj filtresi
     if current_time - last_telegram_send_time < 2:
         print("ÇİFT MESAJ ENGELLENDİ:", msg)
         return
 
     try:
         bot.send_message(CHAT_ID, msg)
-        last_telegram_send_time = current_time # Zamanı güncelle
+        last_telegram_send_time = current_time
         print("TELEGRAM:", msg)
     except Exception as e:
         print("Telegram error:", e)
+
+# ================== TELEGRAM HANDLER ==================
+@bot.message_handler(func=lambda message: True)
+def handle_all(message):
+    if message.text and message.text.lower() == "rapor":
+        send_report()
+
+# ================== REPORT ==================
+def send_report():
+    try:
+        records = list(col.find({"nem": {"$exists": True}})
+                          .sort("time", -1)
+                          .limit(10))
+
+        if not records:
+            send("📊 Veri bulunamadı.")
+            return
+
+        msg = "📊 <b>Son 10 Nem Verisi</b>\n\n"
+
+        for r in records:
+            nem = r.get("nem")
+            time_val = r.get("time")
+
+            if time_val:
+                time_str = time_val.strftime("%d.%m %H:%M")
+            else:
+                time_str = "?"
+
+            msg += f"💧 %{nem}  🕒 {time_str}\n"
+
+        send(msg)
+
+    except Exception as e:
+        print("Rapor error:", e)
+        send("❌ Rapor alınamadı")
 
 # ================== WEBHOOK ==================
 @app.route("/")
@@ -137,12 +173,10 @@ def watchdog():
     while True:
         current_diff = time.time() - last_update
 
-        # 9 saat veri yoksa
         if current_diff > 32400 and not is_alert_active:
             send("⚠️ ESP32 veri göndermiyor (9 saat)")
             is_alert_active = True
 
-        # veri geri gelirse alarm reset
         elif current_diff < 32400:
             is_alert_active = False
 
