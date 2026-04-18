@@ -36,12 +36,14 @@ last_update = time.time()
 is_alert_active = False
 last_telegram_send_time = 0
 
+# 🔥 RAM BUFFER (SON 5 VERİ)
+last_5_data = []
+
 # ================== TELEGRAM ==================
 def send(msg):
     global last_telegram_send_time
     current_time = time.time()
 
-    # Çift mesaj filtresi
     if current_time - last_telegram_send_time < 2:
         print("ÇİFT MESAJ ENGELLENDİ:", msg)
         return
@@ -59,29 +61,17 @@ def handle_all(message):
     if message.text and message.text.lower() == "rapor":
         send_report()
 
-# ================== REPORT ==================
+# ================== RAPOR (SON 5 VERİ) ==================
 def send_report():
     try:
-        records = list(col.find({"nem": {"$exists": True}})
-                          .sort("time", -1)
-                          .limit(10))
-
-        if not records:
+        if not last_5_data:
             send("📊 Veri bulunamadı.")
             return
 
-        msg = "📊 <b>Son 10 Nem Verisi</b>\n\n"
+        msg = "📊 <b>Son 5 Nem Verisi</b>\n\n"
 
-        for r in records:
-            nem = r.get("nem")
-            time_val = r.get("time")
-
-            if time_val:
-                time_str = time_val.strftime("%d.%m %H:%M")
-            else:
-                time_str = "?"
-
-            msg += f"💧 %{nem}  🕒 {time_str}\n"
+        for r in reversed(last_5_data):
+            msg += f"💧 %{r['nem']}  🕒 {r['time'].strftime('%H:%M:%S')}\n"
 
         send(msg)
 
@@ -115,7 +105,7 @@ def on_connect(client, userdata, flags, rc):
 
 
 def on_message(client, userdata, msg):
-    global last_update
+    global last_update, last_5_data
 
     last_update = time.time()
 
@@ -140,6 +130,16 @@ def on_message(client, userdata, msg):
             send("🔒 Sistem kilitlendi (3 hata sonrası)")
             col.insert_one({"type": "locked", "time": datetime.datetime.now()})
             return
+
+        # ================= RAM SAVE =================
+        if nem is not None:
+            last_5_data.append({
+                "nem": nem,
+                "time": datetime.datetime.now()
+            })
+
+            if len(last_5_data) > 5:
+                last_5_data.pop(0)
 
         # ================= NORMAL DATA =================
         msg_text = (
