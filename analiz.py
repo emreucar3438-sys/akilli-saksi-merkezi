@@ -57,11 +57,11 @@ def send(msg):
 
 # ================== TELEGRAM HANDLER ==================
 # ================== TELEGRAM HANDLER ==================
-@bot.message_handler(func=lambda message: True)
-def handle_all(message):
-    print(f"Gelen Mesaj: {message.text}") # Debug için ekledik
-    if message.text and message.text.lower() == "rapor":
-        send_report()
+# ================== TELEGRAM HANDLER ==================
+@bot.message_handler(commands=['rapor'])
+def handle_rapor(message):
+    print("Telegram'dan /rapor komutu geldi!", flush=True)
+    send_report()
 
 # ================== RAPOR (SON 5 VERİ) ==================
 def send_report():
