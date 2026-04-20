@@ -108,7 +108,6 @@ def on_connect(client, userdata, flags, rc):
 
 def on_message(client, userdata, msg):
     global last_update, last_5_data
-
     last_update = time.time()
 
     try:
@@ -121,49 +120,54 @@ def on_message(client, userdata, msg):
         water = data.get("water")
         status = data.get("status")
 
-        # ================= LOW BATTERY =================
+        # 1. KRİTİK DURUMLAR (Öncelikli Uyarılar)
+        if status == "SENSOR_ERROR":
+            send("⚠️ <b>SENSÖR HATASI!</b>\nStandart sapma yüksek, tahminleme moduna geçildi. Lütfen sensörü kontrol edin!")
+            # Buraya 'return' koymuyoruz çünkü tahmin edilen nemi de aşağıda raporlamak istiyoruz.
+
         if status == "LOW_BATTERY":
             send("🔋 <b>BATARYA DÜŞÜK!</b>\n⚠️ Sistem şarja ihtiyaç duyuyor")
             col.insert_one({"type": "battery_low", "time": datetime.datetime.now()})
             return
 
-        # ================= LOCK =================
         if status == "LOCKED":
             send("🔒 Sistem kilitlendi (3 hata sonrası)")
             col.insert_one({"type": "locked", "time": datetime.datetime.now()})
             return
 
-        # ================= RAM SAVE =================
+        # 2. VERİ KAYIT (RAM Buffer)
         if nem is not None:
-            last_5_data.append({
-                "nem": nem,
-                "time": datetime.datetime.now()
-            })
-
+            last_5_data.append({"nem": nem, "time": datetime.datetime.now()})
             if len(last_5_data) > 5:
                 last_5_data.pop(0)
 
-        # ================= NORMAL DATA =================
-        msg_text = (
-            f"🌱 <b>Akıllı Saksı</b>\n"
-            f"💧 Nem: %{nem}\n"
-            f"🌡 Sıcaklık: {temp}°C\n"
-            f"⚠️ Kritik: %{kritik}\n"
-            f"🚰 Su: {water:.1f} ml"
-        )
+            # 3. NORMAL MESAJ OLUŞTURMA
+            msg_text = (
+                f"🌱 <b>Akıllı Saksı</b>\n"
+                f"💧 Nem: %{nem}\n"
+                f"🌡 Sıcaklık: {temp}°C\n"
+                f"⚠️ Kritik: %{kritik}\n"
+                f"🚰 Su: {water:.1f} ml"
+            )
 
-        if nem < kritik:
-            msg_text = "🚨 <b>KRİTİK NEM!</b>\n" + msg_text
+            # Eğer tahminleme modundaysak mesajın sonuna küçük bir not ekleyelim (Opsiyonel)
+            if status == "SENSOR_ERROR":
+                msg_text += "\n\n<i>(Veriler tahminidir)</i>"
 
-        send(msg_text)
+            if nem < kritik:
+                msg_text = "🚨 <b>KRİTİK NEM!</b>\n" + msg_text
 
-        col.insert_one({
-            "nem": nem,
-            "temp": temp,
-            "kritik": kritik,
-            "water": water,
-            "time": datetime.datetime.now()
-        })
+            send(msg_text)
+
+            # 4. DB KAYDI
+            col.insert_one({
+                "nem": nem,
+                "temp": temp,
+                "kritik": kritik,
+                "water": water,
+                "status": status,
+                "time": datetime.datetime.now()
+            })
 
     except Exception as e:
         print("MQTT error:", e)
