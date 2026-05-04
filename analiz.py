@@ -44,7 +44,7 @@ def send(msg):
     global last_telegram_send_time
     current_time = time.time()
 
-    if current_time - last_telegram_send_time < 2:
+    if current_time - last_telegram_send_time < 1:
         print("ÇİFT MESAJ ENGELLENDİ:", msg)
         return
 
@@ -113,64 +113,77 @@ def on_message(client, userdata, msg):
     try:
         payload = msg.payload.decode()
         data = json.loads(payload)
+        
+        # 0. Mesaj Tipini Al (Hata almamak için en başta tanımlıyoruz)
+        msg_type = data.get("type")
 
+        # --- ÖZEL MESAJ TİPLERİ (SULAMA VE KRİTİK DURUMLAR)
+        if msg_type == "INFO":
+            send(f"☀️ <b>Güneş Ertelemesi</b>\nNem: %{data.get('nem')}\nIşık: {data.get('isik')}\nSulama akşam saatlerine ertelendi.")
+            return
+        if msg_type == "DECISION":
+            send(f"💧 <b>SULAMA BAŞLADI</b>\nSebep: {data.get('reason')}")
+            return # Alt satırlara devam etme
+
+        if msg_type == "CRITICAL":
+            send(f"🚨 <b>ACİL DURUM:</b> {data.get('msg')}")
+            return
+
+        if msg_type == "RESULT":
+            post_nem = data.get("post_nem")
+            water = data.get("water")
+            send(f"✅ <b>SULAMA TAMAMLANDI</b>\n💧 Son Nem: %{post_nem}\n🧪 Harcanan: {water} ml")
+            return
+        # -------------------------------------------------------
+
+        # 1. STANDART DURUM VERİLERİNİ AL
         nem = data.get("nem")
-        temp = data.get("temp")
-        kritik = data.get("kritik")
-        water = data.get("water")
-        status = data.get("status")
+        temp = data.get("temp", 0)
+        kritik = data.get("kritik", 40)
+        water = data.get("water", 0)
+        status = data.get("status", "OK")
 
-        # 1. KRİTİK DURUMLAR (Öncelikli Uyarılar)
+        # 2. ÖNCELİKLİ DURUM KONTROLLERİ (Hata ve Pil)
+        alert_prefix = ""
         if status == "SENSOR_ERROR":
-            send("⚠️ <b>SENSÖR HATASI!</b>\nStandart sapma yüksek, tahminleme moduna geçildi. Lütfen sensörü kontrol edin!")
-            # Buraya 'return' koymuyoruz çünkü tahmin edilen nemi de aşağıda raporlamak istiyoruz.
-
+            alert_prefix = "⚠️ <b>TAHMİN MODU:</b> Sensör gürültülü!\n"
+        
         if status == "LOW_BATTERY":
-            send("🔋 <b>BATARYA DÜŞÜK!</b>\n⚠️ Sistem şarja ihtiyaç duyuyor")
-            col.insert_one({"type": "battery_low", "time": datetime.datetime.now()})
+            send("🔋 <b>BATARYA DÜŞÜK!</b>\n⚠️ Sistem kapanmak üzere.")
             return
 
         if status == "LOCKED":
-            send("🔒 Sistem kilitlendi (3 hata sonrası)")
-            col.insert_one({"type": "locked", "time": datetime.datetime.now()})
+            send("🚨 <b>SİSTEM KİLİTLENDİ!</b>\n3 denemeye rağmen nem yükselmedi. Su bitmiş olabilir.")
             return
 
-        # 2. VERİ KAYIT (RAM Buffer)
+        # 3. VERİ KAYIT VE MESAJ OLUŞTURMA
         if nem is not None:
+            # RAM Buffer Güncelleme
             last_5_data.append({"nem": nem, "time": datetime.datetime.now()})
-            if len(last_5_data) > 5:
+            if len(last_5_data) > 5: 
                 last_5_data.pop(0)
 
-            # 3. NORMAL MESAJ OLUŞTURMA
+            # Mesaj Metni
             msg_text = (
+                f"{alert_prefix}"
                 f"🌱 <b>Akıllı Saksı</b>\n"
                 f"💧 Nem: %{nem}\n"
                 f"🌡 Sıcaklık: {temp}°C\n"
-                f"⚠️ Kritik: %{kritik}\n"
                 f"🚰 Su: {water:.1f} ml"
             )
 
-            # Eğer tahminleme modundaysak mesajın sonuna küçük bir not ekleyelim (Opsiyonel)
-            if status == "SENSOR_ERROR":
-                msg_text += "\n\n<i>(Veriler tahminidir)</i>"
-
-            if nem < kritik:
+            # Kritik Nem Uyarısı (Gerçekten nem düşükse ve sensör sağlamsa)
+            if nem < kritik and status != "SENSOR_ERROR":
                 msg_text = "🚨 <b>KRİTİK NEM!</b>\n" + msg_text
 
             send(msg_text)
 
-            # 4. DB KAYDI
-            col.insert_one({
-                "nem": nem,
-                "temp": temp,
-                "kritik": kritik,
-                "water": water,
-                "status": status,
-                "time": datetime.datetime.now()
-            })
+            # MongoDB Kaydı
+            data["time"] = datetime.datetime.now()
+            col.insert_one(data)
 
     except Exception as e:
-        print("MQTT error:", e)
+        print(f"MQTT error: {e}")
 
 # ================== WATCHDOG ==================
 def watchdog():
@@ -194,8 +207,13 @@ def mqtt_loop():
     client.on_connect = on_connect
     client.on_message = on_message
 
-    client.connect(MQTT_BROKER, 1883, 60)
-    client.loop_forever()
+    while True:
+        try:
+            client.connect(MQTT_BROKER, 1883, 60)
+            client.loop_forever()
+        except Exception as e:
+            print("MQTT reconnecting...", e)
+            time.sleep(5)
 
 # ================== MAIN ==================
 if __name__ == "__main__":
@@ -203,4 +221,4 @@ if __name__ == "__main__":
     threading.Thread(target=watchdog, daemon=True).start()
 
     print("Server started...")
-    app.run(host="0.0.0.0", port=PORT)
+app.run(host="0.0.0.0", port=PORT, threaded=True, use_reloader=False)
