@@ -152,9 +152,16 @@ def on_message(client, userdata, msg):
             send("🔋 <b>BATARYA DÜŞÜK!</b>\n⚠️ Sistem kapanmak üzere.")
             return
 
-        if status == "LOCKED":
-            send("🚨 <b>SİSTEM KİLİTLENDİ!</b>\n3 denemeye rağmen nem yükselmedi. Su bitmiş olabilir.")
-            return
+        # GÜNCELLENEN KISIM: Kilitli ise sadece kilit ve sıcaklık mesajı gönder
+        if is_locked:
+            msg_text = (
+                f"🔒 <b>SİSTEM KİLİTLİ</b>\n"
+                f"⚠️ Pompa koruması devrede!\n"
+                f"🌡 Hava Sıcaklığı: {temp}°C\n\n"
+                f"📌 Su bitmiş olabilir, lütfen kontrol et."
+            )
+            send(msg_text)
+            return # Fonksiyonu burada keser, alttaki nem mesajlarını atmaz.
 
         # 3. VERİ KAYIT VE MESAJ OLUŞTURMA
         if nem is not None:
