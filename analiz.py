@@ -159,15 +159,15 @@ def on_message(client, userdata, msg):
 # Sadece metin "true" ise veya gerçekten Boolean True ise kilitli say:
 is_locked = is_locked_raw == "true" or is_locked_raw is True
 
-if is_locked:
-    msg_text = (
-        f"🔒 <b>SİSTEM KİLİTLİ</b>\n"
-        f"⚠️ Pompa koruması devrede!\n"
-        f"🌡 Hava Sıcaklığı: {temp}°C\n\n"
-        f"📌 Su bitmiş olabilir, lütfen kontrol et."
-    )
-    send(msg_text)
-    return
+        if is_locked:
+            msg_text = (
+            f"🔒 <b>SİSTEM KİLİTLİ</b>\n"
+            f"⚠️ Pompa koruması devrede!\n"
+            f"🌡 Hava Sıcaklığı: {temp}°C\n\n"
+            f"📌 Su bitmiş olabilir, lütfen kontrol et."
+             )
+            send(msg_text)
+           return
         # 3. VERİ KAYIT VE MESAJ OLUŞTURMA
         if nem is not None:
             # RAM Buffer Güncelleme
