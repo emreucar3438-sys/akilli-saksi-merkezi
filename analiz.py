@@ -142,6 +142,7 @@ def on_message(client, userdata, msg):
         kritik = data.get("kritik", 40)
         water = data.get("water", 0)
         status = data.get("status", "OK")
+        is_locked = data.get("locked")
 
         # 2. ÖNCELİKLİ DURUM KONTROLLERİ (Hata ve Pil)
         alert_prefix = ""
