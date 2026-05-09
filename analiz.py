@@ -116,8 +116,25 @@ def on_message(client, userdata, msg):
         msg_type = data.get("type")
 
         # --- ÖZEL MESAJ TİPLERİ (SULAMA VE KRİTİK DURUMLAR)
+# --- ÖZEL MESAJ TİPLERİ (SULAMA VE KRİTİK DURUMLAR) ---
         if msg_type == "INFO":
-            send(f"☀️ <b>Güneş Ertelemesi</b>\nNem: %{data.get('nem')}\nIşık: {data.get('isik')}\nSulama akşam saatlerine ertelendi.")
+            msg_content = data.get("msg", "")
+            
+            # Güneş Erteleme Senaryosu
+            if msg_content == "GUNES_ERTELEME_30SN":
+                mesaj = (
+                    f"☀️ <b>GÜNEŞTEN DOLAYI ERTELENDİ</b>\n"
+                    f"────────────────────\n"
+                    f"💧 <b>Mevcut Nem:</b> %{data.get('nem')}\n"
+                    f"💡 <b>Işık Şiddeti:</b> {data.get('isik')}\n\n"
+                    f"🕒 Bitki köklerinin haşlanmaması için sulama kısa bir süre ertelendi. "
+                    f"Bulutlanma olduğunda veya ışık azaldığında tekrar denenecek."
+                )
+                send(mesaj)
+            
+            # Diğer info mesajları için genel yapı
+            else:
+                send(f"ℹ️ <b>BİLGİ:</b> {msg_content}\nNem: %{data.get('nem')}")
             return
         if msg_type == "DECISION":
             send(f"💧 <b>SULAMA BAŞLADI</b>\nSebep: {data.get('reason')}")
@@ -229,3 +246,4 @@ if __name__ == "__main__":
 
     print("Server started...")
 app.run(host="0.0.0.0", port=PORT, threaded=True, use_reloader=False)
+
