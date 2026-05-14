@@ -44,13 +44,14 @@ def send(msg):
     global last_telegram_send_time
     current_time = time.time()
 
-    if current_time - last_telegram_send_time < 1:
-        print("ÇİFT MESAJ ENGELLENDİ:", msg)
-        return
+    # Eğer iki mesaj arası 0.5 saniyeden kısaysa, kısa bir mola ver
+    # Böylece ESP'den peş peşe gelen mesajlar engellenmez, sadece sıraya girer.
+    if current_time - last_telegram_send_time < 0.5:
+        time.sleep(0.5) 
 
     try:
         bot.send_message(CHAT_ID, msg)
-        last_telegram_send_time = current_time
+        last_telegram_send_time = time.time() # Zamanı mesaj gönderildikten sonra güncelle
         print("TELEGRAM:", msg)
     except Exception as e:
         print("Telegram error:", e)
