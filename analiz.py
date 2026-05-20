@@ -155,6 +155,7 @@ def on_message(client, userdata, msg):
         nem = data.get("nem")
         temp = data.get("temp", 0)
         kritik = data.get("kritik", 40)
+        isik = data.get("isik", 0)
         water = data.get("water", 0)
         status = data.get("status", "OK")
 
@@ -194,6 +195,7 @@ def on_message(client, userdata, msg):
                 f"🌱 <b>Akıllı Saksı</b>\n"
                 f"💧 Nem: %{nem}\n"
                 f"🌡 Sıcaklık: {temp}°C\n"
+                f"💡 Işık: %{isik}\n"
                 f"🚰 Su: {water:.1f} ml"
             )
 
