@@ -112,46 +112,49 @@ def on_message(client, userdata, msg):
     try:
         payload = msg.payload.decode()
         data = json.loads(payload)
-
-        # 0. Mesaj Tipini Al
         msg_type = data.get("type")
+        msg_content = data.get("msg", "")
 
-        # --- ÖZEL MESAJ TİPLERİ (SULAMA VE KRİTİK DURUMLAR)
-# --- ÖZEL MESAJ TİPLERİ (SULAMA VE KRİTİK DURUMLAR) ---
+        # --- 1. INFO MESAJLARI (Güneş Erteleme vs.) ---
         if msg_type == "INFO":
-            msg_content = data.get("msg", "")
-            
-            # Güneş Erteleme Senaryosu
             if msg_content == "GUNES_ERTELEME_30SN":
                 mesaj = (
                     f"☀️ <b>GÜNEŞTEN DOLAYI ERTELENDİ</b>\n"
                     f"────────────────────\n"
                     f"💧 <b>Mevcut Nem:</b> %{data.get('nem')}\n"
                     f"💡 <b>Işık Şiddeti:</b> {data.get('isik')}\n\n"
-                    f"🕒 Bitki köklerinin haşlanmaması için sulama kısa bir süre ertelendi. "
-                    f"Bulutlanma olduğunda veya ışık azaldığında tekrar denenecek."
+                    f"🕒 Bitki köklerinin haşlanmaması için sulama kısa bir süre ertelendi."
                 )
                 send(mesaj)
-            
-            # Diğer info mesajları için genel yapı
             else:
                 send(f"ℹ️ <b>BİLGİ:</b> {msg_content}\nNem: %{data.get('nem')}")
+            return # Bu tip işlendi, diğerlerini kontrol etme
+
+        # --- 2. LOG MESAJLARI (Yağmur Durumu ve Genel Loglar) ---
+        elif msg_type == "LOG":
+            # Yağmur kelimelerini yakala
+            if any(k in msg_content for k in ["Yagmur", "yagabilir", "Yağmur"]):
+                send(f"🌧️ <b>HAVA DURUMU UYARISI</b>\n{msg_content}")
+            else:
+                send(f"ℹ️ <b>BİLGİ:</b> {msg_content}")
             return
-        if msg_type == "DECISION":
+
+        # --- 3. DİĞER ÖZEL TİPLER (DECISION, CRITICAL, RESULT) ---
+        elif msg_type == "DECISION":
             send(f"💧 <b>SULAMA BAŞLADI</b>\nSebep: {data.get('reason')}")
             return
 
-        if msg_type == "CRITICAL":
-            send(f"🚨 <b>ACİL DURUM:</b> {data.get('msg')}")
+        elif msg_type == "CRITICAL":
+            send(f"🚨 <b>ACİL DURUM:</b> {msg_content}")
             return
 
-        if msg_type == "RESULT":
+        elif msg_type == "RESULT":
             post_nem = data.get("post_nem")
             water = data.get("water")
             send(f"✅ <b>SULAMA TAMAMLANDI</b>\n💧 Son Nem: %{post_nem}\n🧪 Harcanan: {water} ml")
             return
 
-        # 1. STANDART DURUM VERİLERİNİ AL
+        # --- 4. STANDART DURUM VERİLERİ (Diğer tüm veri akışları) ---
         nem = data.get("nem")
         temp = data.get("temp", 0)
         kritik = data.get("kritik", 40)
@@ -159,59 +162,30 @@ def on_message(client, userdata, msg):
         water = data.get("water", 0)
         status = data.get("status", "OK")
 
-        # 2. ÖNCELİKLİ DURUM KONTROLLERİ (Hata ve Pil)
-        alert_prefix = ""
-        if status == "SENSOR_ERROR":
-            alert_prefix = "⚠️ <b>TAHMİN MODU:</b> Sensör gürültülü!\n"
-
         if status == "LOW_BATTERY":
             send("🔋 <b>BATARYA DÜŞÜK!</b>\n⚠️ Sistem kapanmak üzere.")
             return
 
-        # Kilitli ise sadece kilit ve sıcaklık mesajı gönder
-        is_locked_raw = data.get("locked")
-        is_locked = is_locked_raw == "true" or is_locked_raw is True
-
+        is_locked = data.get("locked") == "true" or data.get("locked") is True
         if is_locked:
-            msg_text = (
-                f"🔒 <b>SİSTEM KİLİTLİ</b>\n"
-                f"⚠️ Pompa koruması devrede!\n"
-                f"🌡 Hava Sıcaklığı: {temp}°C\n\n"
-                f"📌 Su bitmiş olabilir, lütfen kontrol et."
-            )
-            send(msg_text)
+            send("🔒 <b>SİSTEM KİLİTLİ</b>\n⚠️ Pompa koruması devrede! Su bitmiş olabilir.")
             return
 
-        # 3. VERİ KAYIT VE MESAJ OLUŞTURMA
         if nem is not None:
             # RAM Buffer Güncelleme
             last_5_data.append({"nem": nem, "time": datetime.datetime.now()})
-            if len(last_5_data) > 5:
-                last_5_data.pop(0)
+            if len(last_5_data) > 5: last_5_data.pop(0)
 
-            # Mesaj Metni
-            msg_text = (
-                f"{alert_prefix}"
-                f"🌱 <b>Akıllı Saksı</b>\n"
-                f"💧 Nem: %{nem}\n"
-                f"🌡 Sıcaklık: {temp}°C\n"
-                f"💡 Işık: %{isik}\n"
-                f"🚰 Su: {water:.1f} ml"
-            )
-
-            # Kritik Nem Uyarısı
+            msg_text = f"🌱 <b>Akıllı Saksı</b>\n💧 Nem: %{nem}\n🌡 Sıcaklık: {temp}°C\n💡 Işık: %{isik}\n🚰 Su: {water:.1f} ml"
             if nem < kritik and status != "SENSOR_ERROR":
                 msg_text = "🚨 <b>KRİTİK NEM!</b>\n" + msg_text
-
+            
             send(msg_text)
-
-            # MongoDB Kaydı
             data["time"] = datetime.datetime.now()
             col.insert_one(data)
 
     except Exception as e:
-        print(f"MQTT error: {e}")
-
+        print(f"MQTT işleme hatası: {e}")
 # ================== WATCHDOG ==================
 def watchdog():
     global last_update, is_alert_active
